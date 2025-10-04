@@ -21,6 +21,12 @@
       direction: ltr !important;
     }
 
+    .details{
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
     .code-box code {
       font-family: Consolas, Monaco, monospace;
       font-size: 15px;

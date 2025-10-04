@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="note">
+    main.tf
+  </div>
+    <div class="code-box"><code>
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws   = { source = "hashicorp/aws", version = "~> 5.0" }
+    tls   = { source = "hashicorp/tls", version = "~> 4.0" }
+    local = { source = "hashicorp/local", version = "~> 2.4" }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+# ❗️به‌جای data از resource استفاده می‌کنیم
+resource "aws_default_vpc" "default" {}
+
+resource "aws_default_subnet" "default_az1" {
+  availability_zone = var.az
+}
+
+# آخرین Amazon Linux 2023 (x86_64)
+data "aws_ami" "al2023" {
+  owners      = ["amazon"]
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+# Security Group برای SSH/HTTP
+resource "aws_security_group" "web_sg" {
+  name        = "tf-ec2-sg"
+  description = "Allow SSH and HTTP"
+  vpc_id      = aws_default_vpc.default.id
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # بهتره به IP خودت محدودش کنی
+  }
+
+  ingress {
+    description = "HTTP"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "tf-ec2-sg" }
+}
+
+# کلید SSH
+resource "tls_private_key" "ssh" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "this" {
+  key_name   = var.key_name
+  public_key = tls_private_key.ssh.public_key_openssh
+}
+
+resource "local_file" "private_key" {
+  content         = tls_private_key.ssh.private_key_pem
+  filename        = "${path.module}/${var.key_name}.pem"
+  file_permission = "0600"
+}
+
+# خود EC2
+resource "aws_instance" "ec2" {
+  ami                         = data.aws_ami.al2023.id
+  instance_type               = var.instance_type
+  subnet_id                   = aws_default_subnet.default_az1.id
+  vpc_security_group_ids      = [aws_security_group.web_sg.id]
+  key_name                    = aws_key_pair.this.key_name
+  associate_public_ip_address = true
+
+  user_data = <<-EOF
+              #!/bin/bash
+              dnf -y update
+              dnf -y install nginx
+              systemctl enable --now nginx
+              echo "Hello from Terraform on Amazon Linux 2023" > /usr/share/nginx/html/index.html
+              EOF
+
+  tags = { Name = "tf-ec2", Env = "dev" }
+}
+
+</code></div>
+<hr class="separator">
+    <div class="note">
+    outputs.tf
+  </div>
+    <div class="code-box"><code>
+output "instance_id" {
+  value = aws_instance.ec2.id
+}
+
+output "public_ip" {
+  value = aws_instance.ec2.public_ip
+}
+
+output "ssh_command" {
+  value = "ssh -i ${var.key_name}.pem ec2-user@${aws_instance.ec2.public_ip}"
+}
+
+</code></div>
+<hr class="separator">
+    <div class="note">
+    variables.tf 
+  </div>
+    <div class="code-box"><code>
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}
+
+variable "az" {
+  type    = string
+  default = "us-east-1a"
+}
+
+variable "instance_type" {
+  type    = string
+  default = "t3.micro"
+}
+
+variable "key_name" {
+  type    = string
+  default = "tf-ec2-key"
+}
+
+</code></div>
+<hr class="separator">
+   <div class="note">
+    run commands
+  </div>
+      <div class="code-box"><code>
+
+        1: aws configure
+
+        2:trraform init
+
+        3: trraform plan
+
+        4: trraform apply
+
+        =========================================================
+
+        //this buttom commands for delete all resources!!!!
+
+        5: trraform destroy
+
+        6: rm -rf .terraform/ .terraform.lock.hcl *.pem
+
+        =========================================================
+
+</code></div>
+</body>
+</html>
