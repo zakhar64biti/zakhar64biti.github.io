@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body  dir="rtl">
+
+<h3>
+  تمرین۱)
+فرض کنید فایل های  ارایه شده، Assetها و محتوای وب‌سایت مسابقات جهانی Lyon 2024  هستند. به بهینه‌ترین روشی که فکر می‌کنید این محتوا (وب‌سایت مسابقات) را میزبانی کنید.
+دسترسی به مسیر /secure باید محدود شود. درواقع لازم است برای مسیر /secure یک مکانیزم هویت سنجی ساده تعبیه کنید (همانند شکل زیر) که با نام کاربری skilluser و رمز mypassword بتوان ورود کرد و محتوای مورد نظر را دید.
+</h3>
+
+<div class="note">دیدن پورت های tcp</div>
+  <div class="code-box"><code>ss -nltp</code></div>
+  <div class="note">روش پیاده سازی basic auth در nginx</div>
+  <div class="code-box"><code>sudo apt-get install apache2-utils</code></div>
+<div class="code-box"><code>sudo yum install httpd-tools =====> in centOS</code></div>
+<div class="code-box"><code>sudo htpasswd -c /etc/nginx/.htpasswd myuser ===> create user and password</code></div>
+<div class="code-box"><code>
+  server {
+    listen 80;
+    server_name _;  # یا دامنه‌ات
+
+    # روت عمومی (بدون لاگین)
+    root /var/www/html;
+    index index.html;
+
+    # پوشه محافظت‌شده
+    location /secure {
+        # اگر فایل‌ها در /var/www/secure هستند، از alias استفاده کن:
+        alias /var/www/secure/;
+        index index.html;
+
+        auth_basic "Restricted Area";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+    }
+}
+</code></div>
+<div class="code-box"><code>sudo systemctl restart nginx. ====> restart nginx and test</code></div>
+</body>
+</html>
