@@ -16,51 +16,10 @@
   <summary>تمرینات اردوی ملی مهارت ۷ تمرین</summary>
  <div class="details">
  <a href="trainone.html">تمرین اول (nginx base auth)</a>
+ <a href="trainthree.html">تمرین سوم (nginx base auth)</a>
   <a href="terraformec2.html">create ec2 via terraform</a>
  </div>
 </details> 
-
-
-  <div class="note">
-    اسکریپت برای ایجاد ۱۰۰ فایل ۱ کیلو بایتی و push اون روی aws s3 bucket از طریق aws cli
-  </div>
-
-  <div class="code-box">
-    <code>
-#!/bin/bash
-
-BUCKET_NAME="your-bucket-name"
-
-for i in $(seq 1 1000); do
-  dd if=/dev/zero of=testfile-$i.txt bs=1024 count=1
-  aws s3 cp testfile-$i.txt s3://$BUCKET_NAME/testfile-$i.txt
-  rm testfile-$i.txt
-done
-
-
-    </code>
-  </div>
-
-  <div class="note" dir="ltr">
-    run script =========> bash "your bash script file name" like: bash test.sh
-  </div>
-  <div class="note">
-    دیدن حجم فایل ها با du -sh
-  </div>
-
- <hr class="separator">
-
-  <div class="note">
-    دستور ایجاد فایل با حجم دلخواه
-  </div>
-
-  <div class="code-box">
-    <code>
-  dd if=/dev/zero of=testfile-$i.txt bs=1024 count=1
-    </code>
-  </div>
-
-  <hr class="separator">
 
    <!-- بخش Linux Commands -->
   <h2 style="text-align:center;">🐧 Linux Commands</h2>

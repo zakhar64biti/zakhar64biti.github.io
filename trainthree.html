@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body dir="rtl">
+    <h3>
+        تمرین۳)
+
+یک باکت در S3 بسازید.
+هزار فایل یک کیلوبایتی از طریق سیستم خود به شکل خودکار و با اسکریپت به این باکت بریزید.
+فرمت فایل‌ها testfile-01.txt testfile-02.txt testfile-03.txt ….
+فرض کنید این هزار فایل ریخته شده ی۵۰ میلیون فایل با حجم‌های مختلف هستند! و  شما نیاز دارید  یک Attribute دلخواه به Metadataی این فایل‌ها اضافه کنید. چطور و چگونه این کار را انجام می‌دهید؟
+    </h3>
+
+     <div class="note">
+    اسکریپت برای ایجاد ۱۰۰ فایل ۱ کیلو بایتی و push اون روی aws s3 bucket از طریق aws cli
+  </div>
+
+  <div class="code-box">
+    <code>
+#!/bin/bash
+
+BUCKET_NAME="your-bucket-name"
+
+for i in $(seq 1 1000); do
+  dd if=/dev/zero of=testfile-$i.txt bs=1024 count=1
+  aws s3 cp testfile-$i.txt s3://$BUCKET_NAME/testfile-$i.txt
+  rm testfile-$i.txt
+done
+
+
+    </code>
+  </div>
+
+  <div class="note" dir="ltr">
+    run script =========> bash "your bash script file name" like: bash test.sh
+  </div>
+  <div class="note">
+    دیدن حجم فایل ها با du -sh
+  </div>
+
+ <hr class="separator">
+
+  <div class="note">
+    دستور ایجاد فایل با حجم دلخواه
+  </div>
+
+  <div class="code-box">
+    <code>
+  dd if=/dev/zero of=testfile-$i.txt bs=1024 count=1
+    </code>
+  </div>
+
+  <hr class="separator">
+
+</body>
+</html>
