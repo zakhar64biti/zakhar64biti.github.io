@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>VPC PEERING 🔐</h1>
+     <div class="note" dir="rtl"><b>مراحل کنسول</b></div>
+  <ul class="steps">
+    <li>vpc ➜ Create 2 vpc === > (vpc-A & vpc-B)</li>
+    <li>subnet ➜ Create 4 subnet. 2 subnet for vpc-A and 2 subnet for vpc-B ➜ <code>1 private and 1 public</code></li>
+    <li>IGW ➜ Create IGW for 2 vpcs (for public subnets)</li>
+    <li>NAT ➜ Create NAT for 2 vpcs (just attached public subnets)</li>
+    <li>peering ➜ Create peering connection between vpc-A and vpc-B</li>
+    <li>RT ➜ Creatr 2 RT and attach them to vpcs ➜ Add routs ➜ Add subnets | <code style="color: red !important;">set true rout setting for RTS !!!important | private RT-A (just nat and peering)</code></li>
+    <li dir="rtl" style="color: red !important; text-align: right;">رول هارو یادت نره برایه کانکت شدن قبل ساخت ec2 حتما یادت باشه بسازی ⚠️</li>
+    <li dir="rtl" style="color: red !important; text-align: right;">ختما یادت باشه inbound role هارو تنظیم کنی</li>
+  </ul>
+</body>
+</html>
