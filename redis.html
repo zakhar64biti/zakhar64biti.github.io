@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>⚡ Redis</h1>
+     <div class="code-box"><code>
+# ست کردن مقدار
+SET username "saman"
+
+# گرفتن مقدار
+GET username
+
+# کلید با زمان انقضا
+SET session "token123" EX 60    # expires in 60s
+
+# کار با Hash (معادل جدول ساده)
+HSET user:1 name "saman" email "saman@mail.com"
+HGETALL user:1
+HGET user:1 email
+
+# لیست
+LPUSH tasks "task1"
+RPUSH tasks "task2"
+LRANGE tasks 0 -1   # همه آیتم‌ها
+
+     </code></div>
+</body>
+</html>

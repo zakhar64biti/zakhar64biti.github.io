@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>📂 لیست مسیرهای مهم سیستم‌ها و سرویس‌ها</h1>
+      <div class="code-box"><code>
+## 🐧 Linux
+- /etc/passwd → اطلاعات کاربران  
+- /etc/group → گروه‌ها  
+- /etc/hosts → DNS محلی  
+- /etc/ssh/sshd_config → کانفیگ SSH  
+- /etc/fstab → پارتیشن‌ها  
+- /var/log/syslog , /var/log/messages → لاگ سیستم  
+- /var/log/auth.log → لاگ ورود و امنیت  
+
+## 🌐 Nginx
+- /etc/nginx/nginx.conf → کانفیگ اصلی  
+- /etc/nginx/sites-available/ → تعریف سایت‌ها  
+- /etc/nginx/sites-enabled/ → سایت‌های فعال  
+- /var/log/nginx/access.log → لاگ دسترسی  
+- /var/log/nginx/error.log → لاگ خطا  
+
+## 🌐 Apache2
+- /etc/apache2/apache2.conf → کانفیگ اصلی  
+- /etc/apache2/sites-available/ → VirtualHostها  
+- /etc/apache2/sites-enabled/ → فعال‌شده‌ها  
+- /var/log/apache2/access.log → لاگ دسترسی  
+- /var/log/apache2/error.log → لاگ خطا  
+
+## 🗄️ MySQL / MariaDB
+- /etc/mysql/my.cnf یا /etc/my.cnf → فایل اصلی کانفیگ  
+- /var/lib/mysql/ → دیتای اصلی دیتابیس‌ها  
+- /var/run/mysqld/mysqld.sock → سوکت محلی  
+- /var/log/mysql/error.log → لاگ خطا  
+
+## 🗄️ PostgreSQL
+- /etc/postgresql/<version>/main/postgresql.conf → تنظیمات اصلی  
+- /etc/postgresql/<version>/main/pg_hba.conf → دسترسی کاربران/شبکه  
+- /var/lib/postgresql/<version>/main/ → دیتای اصلی  
+- /var/log/postgresql/postgresql.log → لاگ‌ها  
+
+## 🗄️ MongoDB
+- /etc/mongod.conf → کانفیگ اصلی  
+- /var/lib/mongodb/ → دیتای اصلی  
+- /var/log/mongodb/mongod.log → لاگ‌ها  
+
+## ⚡ Redis
+- /etc/redis/redis.conf → فایل اصلی کانفیگ  
+- /var/lib/redis/ → دیتای ذخیره‌شده  
+- /var/log/redis/redis-server.log → لاگ‌ها  
+
+## 🐳 Docker
+- /etc/docker/daemon.json → تنظیمات دیمون  
+- /var/lib/docker/ → دیتای ایمیج‌ها و کانتینرها  
+- /var/run/docker.sock → سوکت ارتباطی Docker  
+- /var/log/docker.log (یا journald) → لاگ  
+
+## ☸️ Kubernetes
+- /etc/kubernetes/admin.conf → kubeconfig اصلی کنترلر  
+- /etc/kubernetes/manifests/ → مانفیست‌های static pod (etcd, apiserver و …)  
+- ~/.kube/config → کانفیگ کاربر برای kubectl  
+- /var/log/pods/ , /var/log/containers/ → لاگ کانتینرها  
+
+## 📊 Monitoring
+- Prometheus → /etc/prometheus/prometheus.yml  
+- Grafana → /etc/grafana/grafana.ini | /var/lib/grafana/ | /var/log/grafana/  
+- ElasticSearch → /etc/elasticsearch/elasticsearch.yml | /var/lib/elasticsearch/ | /var/log/elasticsearch/  
+- Kibana → /etc/kibana/kibana.yml | /var/log/kibana/ | /usr/share/kibana/data/
+
+      </code></div>
+</body>
+</html>
