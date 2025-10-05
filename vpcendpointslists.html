@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1 dir="rtl">🟢 لیست VPC Endpointهای خیلی مهم</h1>
+
+<div class="code-box" style="direction: rtl !important;"><code>
+🔐 SSM (برای Session Manager و Agent)
+
+com.amazonaws.[region].ssm → برای اینکه EC2 با SSM ارتباط بگیره
+
+com.amazonaws.[region].ssmmessages → برای ارتباط Interactive Session Manager
+
+com.amazonaws.[region].ec2messages → برای مدیریت دستورات به EC2
+
+📌 بدون این ۳ تا، اگه اینترنت نداری، Session Manager کار نمیکنه!
+
+<hr class="separator">
+📦 S3 (ذخیره‌سازی)
+
+Gateway Endpoint: com.amazonaws.[region].s3
+📌 هر وقت گفتن EC2 توی Private Subnet باید به S3 وصل بشه → اینو باید بسازی.
+
+<hr class="separator">
+📊 DynamoDB
+
+Gateway Endpoint: com.amazonaws.[region].dynamodb
+📌 دسترسی به DynamoDB بدون اینترنت و NAT.
+
+<hr class="separator">
+📈 CloudWatch
+
+com.amazonaws.[region].logs → برای نوشتن لاگ (EC2, Lambda و …)
+
+com.amazonaws.[region].monitoring → برای متریک‌ها
+
+📌 خیلی مهم چون همه سرویس‌ها لاگ و متریک رو میفرستن CloudWatch.
+
+<hr class="separator">
+📧 SES (برای ارسال ایمیل)
+com.amazonaws.[region].email
+📌 اگه EC2 بخواد ایمیل بفرسته.
+
+<hr class="separator">
+🔑 KMS و Secrets Manager
+
+com.amazonaws.[region].kms → برای رمزنگاری
+
+com.amazonaws.[region].secretsmanager → برای دسترسی به Secretها
+
+📌 سوال تریک‌دار: "Lambda توی Private Subnet باید رمز دیتابیس رو از Secrets Manager بخونه" → باید این Endpoint رو داشته باشی.
+
+<hr class="separator">
+📬 SQS (صف پیام)
+com.amazonaws.[region].sqs
+📌 اگه EC2 یا Lambda بخواد پیام توی صف بخونه یا بنوی
+
+<hr class="separator">
+🧩 EC2
+
+com.amazonaws.[region].ec2 → بعضی سرویس‌ها برای گرفتن metadata یا دستورات خاص به این نیاز دارن.
+
+<hr class="separator">
+✨ سرویس‌های دیگه‌ای که بعضی وقتا میدن
+
+com.amazonaws.[region].sts → برای گرفتن Token موقت (AssumeRole)
+
+com.amazonaws.[region].ecr.api و com.amazonaws.[region].ecr.dkr → برای pull کردن image از ECR داخل Private Subnet
+
+<hr class="separator">
+</code></div>
+</body>
+</html>
