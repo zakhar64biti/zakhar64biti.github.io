@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>IRI worldskill projects 21 day2</h1>
+<details class="note" style="padding: 20px !important;">
+    <summary>Create IOT Core</summary>
+      
+  <ul class="steps">
+    <li>All devices ➜ Things ➜ Create thing | <code style="color: red !important;" dir="rtl">نکته shadow زمانی نیازه که ما نیاز به ثبت وضعیت داشته باشیم</code></li>
+    <li>
+        Policies ➜ Create | <code style="color: red !important;" dir="rtl">برای ایجاد امنیت و دادن دسترسی به همون topic که میخوایم</code>
+        <div class="code-box"><code>
+            {
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iot:Publish",
+        "iot:Subscribe",
+        "iot:Receive",
+        "iot:Connect"
+      ],
+      "Resource": [
+        "arn:aws:iot:*:*:topicfilter//irsc/skill53",
+        "arn:aws:iot:*:*:topic//irsc/skill53",
+        "arn:aws:iot:*:*:client/*"
+      ]
+    }
+  ]
+}
+
+        </code></div>
+    </li>
+    <li>Download === > Cert , Private key , Root CA</li>
+  </ul>
+</details>
+
+<details class="note" style="padding: 20px !important;">
+    <summary>Create DynamoDB</summary>
+      
+  <ul class="steps">
+    <li>Create Table</li>
+    <li dir="rtl" style="color: red !important; text-align: right;">ستون‌های اضافی لازم نیست از قبل بسازی؛ DynamoDB اسکیمای آزاد داره. بقیه فیلدها را Lambda اضافه می‌کند.</li>
+  </ul>
+</details>
+
+<details class="note" style="padding: 20px !important;">
+    <summary>Create Lambda Function (comprehend)</summary>
+      
+  <ul class="steps">
+    <li>IAM > Roles > Create role</li>
+    <li>
+        <div class="code-box"><code>
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["comprehend:DetectSentiment","comprehend:DetectDominantLanguage"], "Resource": "*" },
+    { "Effect": "Allow", "Action": ["dynamodb:PutItem"], "Resource": "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/SentimentMessages" }
+  ]
+}
+
+        </code></div>
+    </li>
+    <li>
+        <div class="code-box"><code>
+import os, json, uuid, time, boto3
+
+dynamodb = boto3.client('dynamodb')
+comprehend = boto3.client('comprehend')
+
+TABLE_NAME = os.environ.get('TABLE_NAME', 'SentimentMessages')
+POSITIVE_THRESHOLD = float(os.environ.get('POSITIVE_THRESHOLD', '0.6'))
+
+def detect_lang(text):
+    try:
+        resp = comprehend.detect_dominant_language(Text=text)
+        langs = resp.get('Languages', [])
+        if not langs:
+            return 'en'
+        # انتخاب زبانی که امتیاز بیشتری داره
+        return sorted(langs, key=lambda x: x.get('Score', 0), reverse=True)[0]['LanguageCode']
+    except Exception:
+        return 'en'
+
+def handler(event, context):
+    # event از IoT Rule → Lambda می‌آید. بسته به قالب، می‌تونه Records یا مستقیم payload باشه.
+    # IoT معمولاً JSON rule payload را مستقیم می‌فرستد.
+    # ما متن پیام را از فیلدهای رایج استخراج می‌کنیم.
+    try:
+        # اگر پیام RAW string باشه:
+        if isinstance(event, str):
+            payload = {"message": event}
+        else:
+            payload = event
+
+        # سعی کن متن را از مکان‌های معمول برداری
+        text = None
+        # 1) اگر خودت در IoT Rule ستون message تعیین کردی
+        for key in ['message', 'text', 'payload', 'msg', 'data']:
+            if key in payload and isinstance(payload[key], (str, bytes)):
+                text = payload[key].decode() if isinstance(payload[key], bytes) else payload[key]
+                break
+
+        # 2) اگر MQTT پیام به شکل {"state": {"reported": {...}}} یا مشابه بود:
+        if text is None:
+            # یک fallback سرسری
+            text = json.dumps(payload)
+
+        # تشخیص زبان → تشخیص احساس
+        lang = detect_lang(text)  # مثلاً "en", "es", "fr", "de", "ar", "fa", ...
+        senti = comprehend.detect_sentiment(Text=text, LanguageCode=lang)
+        sentiment = senti.get('Sentiment', 'NEUTRAL')  # POSITIVE | NEGATIVE | NEUTRAL | MIXED
+        scores = senti.get('SentimentScore', {})
+
+        # فقط اگر مثبت بود و از آستانه گذشت، ذخیره کن
+        is_positive = (sentiment == 'POSITIVE' and scores.get('Positive', 0) >= POSITIVE_THRESHOLD)
+
+        result = {
+            "messageId": str(uuid.uuid4()),
+            "timestamp": int(time.time() * 1000),
+            "language": lang,
+            "sentiment": sentiment,
+            "scores": scores,
+            "text": text
+        }
+
+        if is_positive:
+            dynamodb.put_item(
+                TableName=TABLE_NAME,
+                Item={
+                    "messageId": {"S": result["messageId"]},
+                    "timestamp": {"N": str(result["timestamp"])},
+                    "language": {"S": result["language"]},
+                    "sentiment": {"S": result["sentiment"]},
+                    "positiveScore": {"N": str(scores.get('Positive', 0))},
+                    "text": {"S": result["text"][:1500]}  # محدودیت 400KB داریم، احتیاط
+                }
+            )
+            result["dynamodb_written"] = True
+        else:
+            result["dynamodb_written"] = False
+
+        return {
+            "statusCode": 200,
+            "body": result
+        }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "error": str(e),
+            "event_sample": event
+        }
+
+        </code></div>
+    </li>
+    <li dir="rtl" style="color: red !important; text-align: right;">نکته: Comprehend برای DetectSentiment باید LanguageCode بگیرد؛ با detect_dominant_language اول زبان را حدس زدیم.</li>
+  </ul>
+</details>
+
+<details class="note" style="padding: 20px !important;">
+    <summary dir="rtl">اجازه Invoke از طرف IoT به Lambda</summary>
+      
+  <ul class="steps">
+    <li>Lambda > iot-sentiment-writer > Configuration > Permissions > Resource-based policy</li>
+    <li dir="rtl">باید ورودی‌ای ببینی که به iot.amazonaws.com اجازه lambda:InvokeFunction می‌دهد.</li>
+  </ul>
+</details>
+
+<details class="note" style="padding: 20px !important;">
+    <summary dir="rtl">ساخت IoT Rule (اتصال MQTT → Lambda)</summary>
+      
+  <ul class="steps">
+    <li>IoT Core > Message routing > Rules > Create rule</li>
+    <li>Rule name: iotToLambdaSentiment</li>
+    <li dir="rtl">SQL: اگر تاپیکت چیزی مثل devices/+/messages است</li>
+        <div class="code-box"><code>
+            SELECT *
+            FROM 'devices/+/messages'
+        </code></div>
+  </ul>
+</details>
+</body>
+</html>
