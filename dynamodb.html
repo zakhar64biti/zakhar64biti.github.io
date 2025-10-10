@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Lambda DynamoDB</h1>
+    <details class="note" style="padding: 20px !important;">
+    <summary>Lambda → DynamoDB GetItem</summary>
+      
+  <ul class="steps">
+        <div class="code-box"><code>
+# filename: lambda_function.py
+
+import os
+import boto3
+from boto3.dynamodb.conditions import Key
+
+# اتصال به سرویس DynamoDB
+dynamodb = boto3.resource("dynamodb")
+
+# گرفتن نام جدول از Environment Variable (بهتر از هاردکد کردن)
+TABLE_NAME = os.getenv("TABLE_NAME", "Messages")
+table = dynamodb.Table(TABLE_NAME)
+
+def lambda_handler(event, context):
+    """
+    این فانکشن وقتی اجرا میشه، یک مقدار رو بر اساس id از DynamoDB می‌خونه.
+    event باید شامل "id" باشه.
+    """
+
+    # 1) گرفتن id از ورودی event
+    item_id = event.get("id")   # مثلا {"id": "1234"}
+    if not item_id:
+        return {
+            "statusCode": 400,
+            "body": "❌ لطفاً یک id بدهید"
+        }
+
+    # 2) فراخوانی DynamoDB برای گرفتن داده
+    try:
+        response = table.get_item(Key={"id": item_id})
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": f"❌ خطا در خواندن DynamoDB: {str(e)}"
+        }
+
+    # 3) بررسی اینکه داده وجود داشت یا نه
+    item = response.get("Item")
+    if not item:
+        return {
+            "statusCode": 404,
+            "body": f"❌ آیتم با id={item_id} پیدا نشد"
+        }
+
+    # 4) برگردوندن آیتم
+    return {
+        "statusCode": 200,
+        "body": item
+    }
+
+        </code></div>
+  </ul>
+</details>
+
+   <details class="note" style="padding: 20px !important;">
+    <summary>Lambda → DynamoDB PutItem</summary>
+      
+  <ul class="steps">
+        <div class="code-box"><code>
+            # filename: lambda_function.py
+
+import os
+import json
+import uuid
+import boto3
+from decimal import Decimal
+
+# اتصال به سرویس DynamoDB
+dynamodb = boto3.resource("dynamodb")
+
+# گرفتن نام جدول از Environment Variable
+TABLE_NAME = os.getenv("TABLE_NAME", "Messages")
+table = dynamodb.Table(TABLE_NAME)
+
+def lambda_handler(event, context):
+    """
+    این فانکشن یک آیتم جدید توی DynamoDB ذخیره می‌کنه.
+    ورودی event باید شامل فیلدهای داده باشه (مثلا message یا sentiment).
+    """
+
+    # 1) گرفتن داده‌ها از event
+    message = event.get("message", "no-message")
+    sentiment = event.get("sentiment", "UNKNOWN")
+    score = event.get("score", 0.0)
+
+    # 2) ساخت id یکتا برای هر آیتم
+    item_id = str(uuid.uuid4())
+
+    # 3) آماده‌سازی آیتم برای ذخیره
+    item = {
+        "id": item_id,                       # کلید اصلی جدول
+        "message": message,                  # متن پیام
+        "sentiment": sentiment,              # احساس
+        "score": Decimal(str(score)),        # عدد (float باید به Decimal تبدیل شه)
+    }
+
+    # 4) ذخیره در DynamoDB
+    try:
+        table.put_item(Item=item)
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": f"❌ خطا در نوشتن DynamoDB: {str(e)}"
+        }
+
+    # 5) خروجی موفق
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "msg": "✅ آیتم ذخیره شد",
+            "id": item_id,
+            "item": item
+        }, ensure_ascii=False)   # ensure_ascii=False برای فارسی
+    }
+        </code></div>
+  </ul>
+</details>
+
+</details>
+
+   <details class="note" style="padding: 20px !important;">
+    <summary dir="rtl">GetItem — خواندن یک رکورد با کلید اصلی</summary>
+      
+  <ul class="steps">
+        <div class="code-box"><code>
+# filename: lambda_function.py
+import os
+import json
+import boto3
+
+# ساخت کلاینت/منبع DynamoDB
+dynamodb = boto3.resource("dynamodb")
+# نام جدول را از Env بگیر (بهتر از هاردکد)
+TABLE = os.getenv("TABLE", "Items")
+table = dynamodb.Table(TABLE)
+
+def lambda_handler(event, context):
+    # ← انتظار: event مثل {"id": "123"}
+    item_id = event.get("id")  # کلید پارتیشن فرضاً "id" است
+    if not item_id:
+        # اگر id ندادند، خطا برگردان
+        return {"statusCode": 400, "body": json.dumps({"error": "id is required"})}
+
+    try:
+        # GetItem با کلید اصلی
+        resp = table.get_item(Key={"id": item_id})
+        item = resp.get("Item")
+        if not item:
+            # اگر آیتم نبود
+            return {"statusCode": 404, "body": json.dumps({"error": "not found"})}
+        # موفق: آیتم را برگردان
+        return {"statusCode": 200, "body": json.dumps(item, ensure_ascii=False)}
+    except Exception as e:
+        # هندل خطای غیرمنتظره
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+
+        </code></div>
+  </ul>
+</details>
+
+</details>
+
+   <details class="note" style="padding: 20px !important;">
+    <summary dir="rtl">PutItem — درج رکورد با شرط Idempotent (اگر وجود داشت نریز)</summary>
+      
+  <ul class="steps">
+        <div class="code-box"><code> 
+# filename: lambda_function.py
+import os, json, uuid, boto3
+from decimal import Decimal
+
+dynamodb = boto3.resource("dynamodb")
+TABLE = os.getenv("TABLE", "Items")
+table = dynamodb.Table(TABLE)
+
+def lambda_handler(event, context):
+    # داده‌های ورودی (دلخواه)؛ اگر نبود پیش‌فرض می‌گذاریم
+    message = event.get("message", "no-message")
+    score = Decimal(str(event.get("score", 0)))
+
+    # تولید id یکتا
+    item_id = event.get("id") or str(uuid.uuid4())
+
+    try:
+        # شرط: اگر id قبلاً وجود دارد، اجازه درج نده
+        table.put_item(
+            Item={"id": item_id, "message": message, "score": score},
+            ConditionExpression="attribute_not_exists(id)"
+        )
+        return {"statusCode": 200, "body": json.dumps({"ok": True, "id": item_id})}
+    except Exception as e:
+        # اگر شرط نقض شود، ConditionalCheckFailedException می‌گیریم
+        return {"statusCode": 409, "body": json.dumps({"ok": False, "error": str(e)})}
+  
+        </code></div>
+  </ul>
+</details>
+
+</details>
+
+   <details class="note" style="padding: 20px !important;">
+    <summary dir="rtl">UpdateItem — به‌روزرسانی با UpdateExpression (SET/ADD/REMOVE)</summary>
+      
+  <ul class="steps">
+        <div class="code-box"><code>   
+            # filename: lambda_function.py
+import os, json, boto3
+from decimal import Decimal
+
+dynamodb = boto3.resource("dynamodb")
+TABLE = os.getenv("TABLE", "Items")
+table = dynamodb.Table(TABLE)
+
+def lambda_handler(event, context):
+    # انتظار: {"id":"123", "message":"new text", "inc": 1, "removeField": true}
+    item_id = event["id"]                 # شناسه رکورد
+    new_message = event.get("message")    # مقدار جدید برای فیلد message
+    inc = Decimal(str(event.get("inc", 0)))  # میزانی که به شمارنده اضافه شود
+    remove_field = event.get("removeField", False)  # اگر True، یک فیلد را حذف می‌کنیم
+
+    # ساخت UpdateExpression داینامیک
+    expr = []
+    names = {}
+    values = {}
+
+    if new_message is not None:
+        # SET #m = :m
+        expr.append("SET #m = :m")
+        names["#m"] = "message"
+        values[":m"] = new_message
+
+    if inc != 0:
+        # ADD #c :one  (افزایش اتمیک شمارنده)
+        expr.append("ADD #c :one")
+        names["#c"] = "count"
+        values[":one"] = inc
+
+    if remove_field:
+        # REMOVE #tmp
+        expr.append("REMOVE #tmp")
+        names["#tmp"] = "tempField"
+
+    # اگر هیچ عملیاتی تعریف نشد
+    if not expr:
+        return {"statusCode": 400, "body": json.dumps({"error":"no update ops"})}
+
+    try:
+        # اعمال آپدیت و درخواست بازگشت مقدار جدید
+        resp = table.update_item(
+            Key={"id": item_id},
+            UpdateExpression=" ".join(expr),
+            ExpressionAttributeNames=names or None,
+            ExpressionAttributeValues=values or None,
+            ReturnValues="ALL_NEW"
+        )
+        return {"statusCode": 200, "body": json.dumps(resp.get("Attributes", {}), ensure_ascii=False)}
+    except Exception as e:
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+
+        </code></div>
+  </ul>
+</details>
+
+</details>
+
+   <details class="note" style="padding: 20px !important;">
+    <summary dir="rtl">Optimistic Locking — آپدیت مشروط با فیلد version</summary>
+      
+  <ul class="steps">
+        <div class="code-box"><code>   
+            # filename: lambda_function.py
+import os, json, boto3
+from decimal import Decimal
+
+dynamodb = boto3.resource("dynamodb")
+TABLE = os.getenv("TABLE", "Items")
+table = dynamodb.Table(TABLE)
+
+def lambda_handler(event, context):
+    # انتظار: {"id":"123", "expectedVersion": 3, "message": "new"}
+    item_id = event["id"]
+    expected_version = Decimal(str(event["expectedVersion"]))  # نسخه‌ای که انتظار داریم
+    new_message = event.get("message", "")
+
+    try:
+        # فقط اگر version فعلی == expectedVersion آپدیت کن و version++ کن
+        resp = table.update_item(
+            Key={"id": item_id},
+            UpdateExpression="SET #m = :m, #v = #v + :one",
+            ConditionExpression="#v = :ev",
+            ExpressionAttributeNames={"#m": "message", "#v": "version"},
+            ExpressionAttributeValues={":m": new_message, ":ev": expected_version, ":one": Decimal("1")},
+            ReturnValues="ALL_NEW"
+        )
+        return {"statusCode": 200, "body": json.dumps(resp["Attributes"], ensure_ascii=False)}
+    except Exception as e:
+        # اگر نسخه نخواند، ConditionalCheckFailedException
+        return {"statusCode": 409, "body": json.dumps({"error": str(e)})}
+
+        </code></div>
+  </ul>
+</details>
+
+</details>
+
+   <details class="note" style="padding: 20px !important;">
+    <summary dir="rtl">DeleteItem — حذف مشروط (مثلاً فقط اگر owner برابر فلان بود)</summary>
+      
+  <ul class="steps">
+        <div class="code-box"><code>  
+            # filename: lambda_function.py
+import os, json, boto3
+
+dynamodb = boto3.resource("dynamodb")
+TABLE = os.getenv("TABLE", "Items")
+table = dynamodb.Table(TABLE)
+
+def lambda_handler(event, context):
+    # انتظار: {"id":"123", "owner":"user-1"}
+    item_id = event["id"]
+    owner = event["owner"]
+
+    try:
+        table.delete_item(
+            Key={"id": item_id},
+            # فقط اگر owner برابر مقدار داده شده باشد
+            ConditionExpression="#o = :o",
+            ExpressionAttributeNames={"#o": "owner"},
+            ExpressionAttributeValues={":o": owner}
+        )
+        return {"statusCode": 200, "body": json.dumps({"deleted": True})}
+    except Exception as e:
+        return {"statusCode": 409, "body": json.dumps({"deleted": False, "error": str(e)})}
+ 
+        </code></div>
+  </ul>
+</details>
+
+</body>
+</html>
