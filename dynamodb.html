@@ -9,6 +9,332 @@
 <body>
     <h1>Lambda DynamoDB</h1>
 
+
+     <details class="note" style="padding: 20px !important;">
+        <summary>
+            lambda + dunamo ==> CRUD
+        </summary>
+        <ul class="steps">
+        <li>
+           <div class="code-box"><code>
+import json
+import boto3
+import decimal
+from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
+
+# ✅ هندل کردن Decimal
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
+
+
+def lambda_handler(event, context):
+    table_name = "users"  # 👈 اسم جدول DynamoDB
+    partition_key = "id"
+
+    dynamodb = boto3.resource("dynamodb")
+    table = dynamodb.Table(table_name)
+
+    method = event.get("httpMethod", "")
+    params = event.get("queryStringParameters") or {}
+
+    try:
+        # =============================
+        # 🔹 GET → گرفتن داده
+        # =============================
+        if method == "GET":
+            key_value = params.get("id")
+            username = params.get("username")
+
+            if key_value:
+                key_value = decimal.Decimal(key_value)
+                response = table.query(
+                    KeyConditionExpression=Key(partition_key).eq(key_value)
+                )
+                items = response.get("Items", [])
+
+            elif username:
+                response = table.scan(
+                    FilterExpression=Attr("username").eq(username)
+                )
+                items = response.get("Items", [])
+
+            else:
+                response = table.scan()
+                items = response.get("Items", [])
+
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps(items, cls=DecimalEncoder)
+            }
+
+        # =============================
+        # 🔹 POST → افزودن داده جدید
+        # =============================
+        elif method == "POST":
+            body = json.loads(event.get("body") or "{}")
+            id_value = body.get("id")
+            username = body.get("username")
+
+            if not id_value or not username:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"error": "Both 'id' and 'username' are required"})
+                }
+
+            table.put_item(Item={"id": decimal.Decimal(str(id_value)), "username": username})
+
+            return {
+                "statusCode": 201,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": "User added successfully"})
+            }
+
+        # =============================
+        # 🔹 PUT → ویرایش داده بر اساس id و username
+        # =============================
+        elif method == "PUT":
+            body = json.loads(event.get("body") or "{}")
+            id_value = body.get("id")
+            username = body.get("username")
+            email = body.get("email")
+
+            if not id_value or not username or not email:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"error": "Fields 'id', 'username', and 'email' are required"})
+                }
+
+            id_value = decimal.Decimal(id_value)
+
+            table.update_item(
+                Key={"id": id_value, "username": username},
+                UpdateExpression="SET email = :email",
+                ExpressionAttributeValues={":email": email}
+            )
+
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": "User updated successfully"})
+            }
+
+        # =============================
+        # 🔹 DELETE → حذف داده بر اساس id و username
+        # =============================
+        elif method == "DELETE":
+            key_value = params.get("id")
+            username = params.get("username")
+
+            if not key_value or not username:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"error": "Both 'id' and 'username' query parameters are required"})
+                }
+
+            key_value = decimal.Decimal(key_value)
+
+            table.delete_item(Key={"id": key_value, "username": username})
+
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": f"User with id={key_value} and username={username} deleted successfully"})
+            }
+
+        # =============================
+        # ❌ سایر متدها
+        # =============================
+        else:
+            return {
+                "statusCode": 405,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"error": f"Method {method} not allowed"})
+            }
+
+    except ClientError as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)})
+        }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)})
+        }
+
+
+           </code></div>
+        </li>
+        <li>
+             <div class="code-box"><code>
+
+  curl -X GET "https://sac4wm2ohj.execute-api.us-east-1.amazonaws.com/dev/user"
+
+  ============================
+
+  curl -X POST "https://sac4wm2ohj.execute-api.us-east-1.amazonaws.com/dev/user" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 7, "username": "reza"}'
+
+  ============================
+
+ curl -X PUT "https://sac4wm2ohj.execute-api.us-east-1.amazonaws.com/dev/update" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5, "username": "farhad", "email": "testemail@gmail.com"}'
+
+
+  ============================
+
+  curl -X DELETE "https://sac4wm2ohj.execute-api.us-east-1.amazonaws.com/dev/user?id=7&username=rza"
+
+             </code>
+        </li>
+        <li dir="rtl" style="color: red !important;">
+            🔹 راه 1: روش پیشنهادی (Delete + Put)
+
+چون نمی‌تونی کلید رو تغییر بدی، باید رکورد قدیمی رو حذف و رکورد جدید رو اضافه کنی:
+        </li>
+            <li>
+             <div class="code-box"><code>
+
+elif method == "PUT":
+    body = json.loads(event.get("body") or "{}")
+    id_value = body.get("id")
+    username = body.get("username")
+    new_username = body.get("new_username")
+
+    if not id_value or not username or not new_username:
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "id, username and new_username are required"})
+        }
+
+    id_value = decimal.Decimal(str(id_value))
+
+    # حذف رکورد قبلی
+    table.delete_item(Key={"id": id_value, "username": username})
+
+    # اضافه کردن رکورد جدید
+    table.put_item(Item={"id": id_value, "username": new_username})
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"message": f"Username updated from {username} to {new_username}"})
+    }
+
+
+             </code>
+        </li>
+        </ul>
+    </details>
+
+
+
+    <details class="note" style="padding: 20px !important;">
+        <summary>
+            Lambda + DynamoDB + API Gateway (get version 2)
+        </summary>
+        <ul class="steps">
+        <li>
+           <div class="code-box"><code>
+
+import json
+import boto3
+import decimal
+from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
+
+# ✅ برای هندل کردن Decimal از DynamoDB
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
+
+
+def lambda_handler(event, context):
+    table_name = "users"   # 👈 اسم دقیق جدولت رو مطمئن شو
+    partition_key = "id"
+
+    params = event.get("queryStringParameters") or {}
+    key_value = params.get("id")
+    username = params.get("username")
+
+    dynamodb = boto3.resource("dynamodb")
+    table = dynamodb.Table(table_name)
+
+    try:
+        # ✅ اگر id ارسال شده → Query
+        if key_value:
+            try:
+                key_value = decimal.Decimal(key_value)
+            except Exception:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"error": "Invalid id type, expected a number"})
+                }
+
+            response = table.query(
+                KeyConditionExpression=Key(partition_key).eq(key_value)
+            )
+            items = response.get("Items", [])
+
+        # ✅ اگر فقط username ارسال شده → Scan با فیلتر
+        elif username:
+            response = table.scan(
+                FilterExpression=Attr("username").eq(username)
+            )
+            items = response.get("Items", [])
+
+        # ✅ اگر هیچ پارامتری نیست → کل جدول
+        else:
+            response = table.scan()
+            items = response.get("Items", [])
+
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(items, cls=DecimalEncoder)
+        }
+
+    except ClientError as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)})
+        }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)})
+        }
+
+
+           </code></div>
+        </li>
+        </ul>
+    </details>
+
        <details class="note" style="padding: 20px !important;">
     <summary>DynamoDB Lambda => GET (API GATEWAY)</summary>
       
