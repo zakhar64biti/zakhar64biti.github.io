@@ -1,27 +1,20 @@
 // copy.js
 document.addEventListener("DOMContentLoaded", () => {
-  const codeBlocks = document.querySelectorAll(".copyable");
+  const copyables = document.querySelectorAll(".copyable");
 
-  codeBlocks.forEach((codeEl) => {
-    // ایجاد آیکون کپی کنار هر بلوک
-    const copyBtn = document.createElement("button");
-    copyBtn.textContent = "📋";
-    copyBtn.className = "copy-btn";
-    copyBtn.title = "Copy to clipboard";
-    codeEl.parentElement.style.position = "relative";
-    codeEl.parentElement.appendChild(copyBtn);
+  copyables.forEach((el) => {
+    el.style.cursor = "pointer";
 
-    copyBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
+    el.addEventListener("click", async () => {
       try {
-        const text = codeEl.innerText.trim();
+        const text = el.innerText.trim();
         await navigator.clipboard.writeText(text);
-        copyBtn.textContent = "✅";
-        setTimeout(() => (copyBtn.textContent = "📋"), 1000);
+
+        // افکت ظریف بازخورد
+        el.classList.add("copied");
+        setTimeout(() => el.classList.remove("copied"), 800);
       } catch (err) {
-        console.error("خطا در کپی:", err);
-        copyBtn.textContent = "❌";
-        setTimeout(() => (copyBtn.textContent = "📋"), 1000);
+        console.error("❌ خطا در کپی:", err);
       }
     });
   });

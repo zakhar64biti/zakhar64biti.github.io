@@ -16,7 +16,7 @@
         </summary>
         <ul class="steps">
         <li>
-           <div class="code-box"><code>
+           <div class="code-box"><code class="copyable">
 import json
 import boto3
 import decimal
@@ -208,7 +208,7 @@ def lambda_handler(event, context):
 چون نمی‌تونی کلید رو تغییر بدی، باید رکورد قدیمی رو حذف و رکورد جدید رو اضافه کنی:
         </li>
             <li>
-             <div class="code-box"><code>
+             <div class="code-box"><code class="copyable">
 
 elif method == "PUT":
     body = json.loads(event.get("body") or "{}")
@@ -251,7 +251,7 @@ elif method == "PUT":
         </summary>
         <ul class="steps">
         <li>
-           <div class="code-box"><code>
+           <div class="code-box"><code class="copyable">
 
 import json
 import boto3
@@ -339,7 +339,7 @@ def lambda_handler(event, context):
     <summary>DynamoDB Lambda => GET (API GATEWAY)</summary>
       
   <ul class="steps">
-        <div class="code-box"><code>  
+        <div class="code-box"><code class="copyable">  
 # filename: lambda_function.py
 import os
 import json
@@ -454,7 +454,7 @@ def lambda_handler(event, context):
     <summary>Lambda → DynamoDB GetItem</summary>
       
   <ul class="steps">
-        <div class="code-box"><code>
+        <div class="code-box"><code class="copyable">
 # filename: lambda_function.py
 
 import os
@@ -513,7 +513,7 @@ def lambda_handler(event, context):
     <summary>Lambda → DynamoDB PutItem</summary>
       
   <ul class="steps">
-        <div class="code-box"><code>
+        <div class="code-box"><code class="copyable">
             # filename: lambda_function.py
 
 import os
@@ -579,7 +579,7 @@ def lambda_handler(event, context):
     <summary dir="rtl">GetItem — خواندن یک رکورد با کلید اصلی</summary>
       
   <ul class="steps">
-        <div class="code-box"><code>
+        <div class="code-box"><code class="copyable">
 # filename: lambda_function.py
 import os
 import json
@@ -621,7 +621,7 @@ def lambda_handler(event, context):
     <summary dir="rtl">PutItem — درج رکورد با شرط Idempotent (اگر وجود داشت نریز)</summary>
       
   <ul class="steps">
-        <div class="code-box"><code> 
+        <div class="code-box"><code class="copyable"> 
 # filename: lambda_function.py
 import os, json, uuid, boto3
 from decimal import Decimal
@@ -659,7 +659,7 @@ def lambda_handler(event, context):
     <summary dir="rtl">UpdateItem — به‌روزرسانی با UpdateExpression (SET/ADD/REMOVE)</summary>
       
   <ul class="steps">
-        <div class="code-box"><code>   
+        <div class="code-box"><code class="copyable">   
             # filename: lambda_function.py
 import os, json, boto3
 from decimal import Decimal
@@ -724,7 +724,7 @@ def lambda_handler(event, context):
     <summary dir="rtl">Optimistic Locking — آپدیت مشروط با فیلد version</summary>
       
   <ul class="steps">
-        <div class="code-box"><code>   
+        <div class="code-box"><code class="copyable">   
             # filename: lambda_function.py
 import os, json, boto3
 from decimal import Decimal
@@ -764,7 +764,7 @@ def lambda_handler(event, context):
     <summary dir="rtl">DeleteItem — حذف مشروط (مثلاً فقط اگر owner برابر فلان بود)</summary>
       
   <ul class="steps">
-        <div class="code-box"><code>  
+        <div class="code-box"><code class="copyable">  
             # filename: lambda_function.py
 import os, json, boto3
 

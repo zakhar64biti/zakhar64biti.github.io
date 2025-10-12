@@ -208,24 +208,28 @@ ul.steps li::before {
   }
 
   .copyable:hover {
-    color: #cc5500; /* رنگ هشدار ملایم */
+    color: #03b123; /* رنگ هشدار ملایم */
   }
 
-  .copyable::after {
-    content: "کپی شد!";
-    position: absolute;
-    top: -1.5em;
-    right: 0;
-    background: #333;
-    color: #fff;
-    font-size: 0.8em;
-    padding: 2px 6px;
-    border-radius: 4px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.4s ease, transform 0.3s ease;
-    transform: translateY(-5px);
-  }
+.copyable::after {
+  content: "Copy Successful";
+  position: fixed;
+  top: 2rem;
+  left: 5rem;
+  width: 200px;
+  margin: 10px auto;
+  font-size: 14px;
+  color: #155724;                /* سبز تیره شیک برای متن */
+  background: #d4edda;           /* سبز روشن ملایم */
+  border-left: 5px solid #28a745;/* سبز مدرن و حرفه‌ای */
+  padding: 10px 15px;
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1); /* سایه ملایم برای عمق */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease, transform 0.3s ease;
+  transform: translateY(-5px);
+}
 
   .copyable.copied::after {
     opacity: 1;
