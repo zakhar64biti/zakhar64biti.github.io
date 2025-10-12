@@ -215,7 +215,7 @@ ul.steps li::before {
   content: "Copy Successful";
   position: fixed;
   top: 2rem;
-  left: 5rem;
+  left: 2rem;
   width: 200px;
   margin: 10px auto;
   font-size: 14px;
