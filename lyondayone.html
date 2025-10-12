@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Lyon Competition</h1>
+
+        <details class="note" style="padding: 20px !important;">
+        <summary>
+            lamda code to connect dynamo and put items from api gateway
+        </summary>
+        <ul class="steps">
+        <li style="color: red !important;">
+            Role === > AWSLambdaVPCAccessExecutionRole
+        </li>
+        <li>
+           <div class="code-box copyable"><code>
+import os
+import json
+import time
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError, EndpointConnectionError
+
+REGION = os.getenv("AWS_REGION", "us-east-1")
+TABLE_NAME = os.getenv("TABLE_NAME", "FeedbackTable")
+
+# کاهش زمان‌های انتظار تا اگر شبکه قطع است، سریع خطا بده (به‌جای ۳s یا بیشتر)
+boto_cfg = Config(connect_timeout=1, read_timeout=2, retries={"max_attempts": 2})
+dynamodb = boto3.resource("dynamodb", region_name=REGION, config=boto_cfg)
+table = dynamodb.Table(TABLE_NAME)
+
+def _resp(code, body):
+    return {
+        "statusCode": code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+        },
+        "body": json.dumps(body, ensure_ascii=False)
+    }
+
+def lambda_handler(event, context):
+    print("[DEBUG] event:", json.dumps(event)[:1500])
+
+    # OPTIONS برای CORS
+    if event.get("httpMethod") == "OPTIONS":
+        return _resp(200, {"ok": True})
+
+    body = event.get("body") or "{}"
+    try:
+        payload = json.loads(body) if isinstance(body, str) else body
+    except json.JSONDecodeError as e:
+        return _resp(400, {"ok": False, "error": f"JSON نامعتبر: {e}"})
+
+    item_id = (payload or {}).get("id")
+    message = (payload or {}).get("message")
+    if not item_id or not message:
+        return _resp(400, {"ok": False, "error": "id و message اجباری هستند."})
+
+    now_ms = int(time.time() * 1000)
+    item = {"id": str(item_id), "message": str(message), "createdAt": now_ms}
+
+    try:
+        # اگر overwrite می‌خواهی، دو پارامتر شرطی را حذف کن
+        table.put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(#id)",
+            ExpressionAttributeNames={"#id": "id"}
+        )
+        return _resp(201, {"ok": True, "item": item})
+
+    except ClientError as e:
+        code = e.response["Error"].get("Code", "")
+        msg = e.response["Error"].get("Message", "")
+        print(f"[ERROR] ClientError {code}: {msg}")
+        if code == "ConditionalCheckFailedException":
+            return _resp(409, {"ok": False, "error": f"id='{item_id}' موجود است."})
+        if code == "ResourceNotFoundException":
+            return _resp(500, {"ok": False, "error": "جدول پیدا نشد/Region اشتباه.", "detail": msg})
+        if code in ("AccessDeniedException", "UnauthorizedOperation"):
+            return _resp(500, {"ok": False, "error": "دسترسی IAM ناکافی.", "detail": msg})
+        return _resp(500, {"ok": False, "error": "ClientError", "detail": msg})
+
+    except EndpointConnectionError as e:
+        print(f"[ERROR] EndpointConnectionError: {e}")
+        return _resp(500, {"ok": False, "error": "اتصال به DynamoDB برقرار نشد. اگر داخل VPC هستی Endpoint/NAT را بساز."})
+
+    except Exception as e:
+        print(f"[ERROR] Unhandled: {e}")
+        return _resp(500, {"ok": False, "error": "Unhandled exception", "detail": str(e)})
+
+           </code></div>
+        </li>
+        </ul>
+    </details>
+
+     <details class="note" style="padding: 20px !important;">
+        <summary>
+            setup dynamoDB
+        </summary>
+        <ul class="steps">
+            <li style="color: rgb(22, 155, 28);">
+                create table
+            </li>
+            <li style="color: rgb(255, 0, 0);">
+                enable deletetion
+            </li>
+             <li>
+                dont forget endpoint !!!
+                <p class="blink_me">Warning: This is an important message!</p>
+            </li>
+        </ul>
+     </details>
+
+     <details class="note" style="padding: 20px !important;">
+        <summary>
+            parameter store
+        </summary>
+        <ul class="steps">
+            <li>
+                endpoint ===> ssm   <p class="blink_me">Warning: This is an important message!</p>
+            </li>
+        </ul>
+     </details>
+</body>
+<script src="copy.js"></script>
+</html>

@@ -155,3 +155,81 @@ ul.steps li::before {
     gap: 5px;
     direction: ltr !important;
   }
+
+  .important{
+    animation: color 2s infinite linear;
+     font-weight: 600;
+  text-shadow: 0 0 10px rgba(180, 40, 0, 0.3);
+  }
+
+  @keyframes color {
+   0% {
+    color: #b30000; /* قرمز تیره */
+  }
+  25% {
+    color: #cc5500; /* نارنجی سوخته */
+  }
+  50% {
+    color: #e6b800; /* طلایی تیره */
+  }
+  75% {
+    color: #cc3300; /* قرمز مایل به نارنجی */
+  }
+  100% {
+    color: #990000; /* قرمز شرابی */
+  }
+  }
+
+  .warning-message {
+  text-align: center;
+  margin-top: 20px;
+}
+
+.blink_me {
+  color: red; /* Initial color for the warning text */
+  font-weight: bold;
+  font-size: 1.2em;
+  animation: blinker 1s linear infinite; /* Apply the animation */
+}
+
+@keyframes blinker {
+  50% {
+    opacity: 0; /* Text is invisible at 50% of the animation cycle */
+  }
+}
+
+
+/* copy text */
+
+  .copyable {
+    cursor: pointer;
+    position: relative;
+    transition: color 0.3s ease;
+  }
+
+  .copyable:hover {
+    color: #cc5500; /* رنگ هشدار ملایم */
+  }
+
+  .copyable::after {
+    content: "کپی شد!";
+    position: absolute;
+    top: -1.5em;
+    right: 0;
+    background: #333;
+    color: #fff;
+    font-size: 0.8em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease, transform 0.3s ease;
+    transform: translateY(-5px);
+  }
+
+  .copyable.copied::after {
+    opacity: 1;
+    transform: translateY(-10px);
+  }
+
+  /* end */
