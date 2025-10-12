@@ -147,3 +147,11 @@ ul.steps li::before {
     flex-direction: column;
     gap: 10px;
   }
+
+  .git{
+    margin-top: 2rem;
+    display: flex;
+    justify-content: left;
+    gap: 5px;
+    direction: ltr !important;
+  }
