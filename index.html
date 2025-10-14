@@ -6,6 +6,18 @@
   <link rel="stylesheet" href="style.css">
 
 </head>
+
+<style>
+  /* در حالت عادی همه چیز مخفی میشه */
+  body.locked * {
+    display: none !important;
+  }
+
+  /* برای پس‌زمینه‌ی مشکی در حالت قفل */
+  body.locked {
+    background-color: black !important;
+  }
+</style>
 <body dir="rtl">
 
 
@@ -119,6 +131,18 @@
 </svg>
 </a></span>
 
+</body>
+<script>
+
+  document.body.classList.add("locked");
 
 
+  document.addEventListener("keydown", function (event) {
+ 
+    if (event.shiftKey && event.key.toLowerCase() === "s") {
+      document.body.classList.toggle("locked");
+    }
+  });
+</script>
 
+</html>
