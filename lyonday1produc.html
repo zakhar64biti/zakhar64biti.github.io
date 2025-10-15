@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WSC TP53 – Stage 1 (Data Ingestion) – راهنمای کنسول</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#9ca3af; --text:#e5e7eb; --accent:#22c55e; --red:#ef4444; --yellow:#f59e0b; --blue:#3b82f6; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
+    header{background:linear-gradient(135deg,#0b1022,#0b172e);padding:24px;border:1px solid #1f2937;border-radius:16px}
+    h1{margin:0 0 8px;font-size:28px}
+    .tag{display:inline-block;margin-inline-end:8px;padding:4px 10px;border:1px solid #1f2937;border-radius:999px;color:var(--muted);font-size:12px}
+    .grid{display:grid;gap:16px}
+    @media (min-width:900px){.grid-2{grid-template-columns:1fr 1fr}}
+    section{background:var(--panel);border:1px solid #1f2937;border-radius:16px;padding:18px}
+    h2{margin:0 0 10px;font-size:20px}
+    h3{margin:16px 0 8px;font-size:16px;color:#cbd5e1}
+    p,li{line-height:1.8}
+    code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+    pre{background:#0b1220;border:1px solid #1f2937;border-radius:12px;padding:14px;overflow:auto}
+    .kbd{display:inline-block;border:1px solid #374151;background:#0b1220;border-radius:6px;padding:0 6px;font-size:12px}
+    .ok{color:var(--accent)} .warn{color:var(--yellow)} .err{color:var(--red)} .info{color:var(--blue)}
+    details{border:1px dashed #303b50;padding:12px;border-radius:12px;margin:10px 0}
+    summary{cursor:pointer;font-weight:600}
+    .checklist li{list-style:'✅ ';margin:6px 0;padding-inline-start:6px}
+    .hint{font-size:13px;color:var(--muted)}
+    .pill{display:inline-block;background:#0b1220;border:1px solid #1f2937;border-radius:999px;padding:4px 10px;margin:2px 6px 2px 0;font-size:12px;color:#cbd5e1}
+    .copy-btn{cursor:pointer;border:1px solid #374151;background:#0b1220;color:#cbd5e1;font-size:12px;padding:6px 10px;border-radius:8px;float:left}
+    .sep{height:1px;background:#1f2937;margin:18px -18px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Stage 1 – Data Ingestion (API + Lambda + DynamoDB)</h1>
+      <div>
+        <span class="tag">منطقه: us-east-1</span>
+        <span class="tag">VPC: Data-Ingestion-VPC</span>
+        <span class="tag">فقط یک Lambda داخل VPC</span>
+        <span class="tag">API امن + مقرون‌به‌صرفه</span>
+      </div>
+      <p class="hint">این سند فقط برای Stage 1 است و به صورت «راهنمای کنسول + کد نمونه» نوشته شده تا مستقیم در پروژه/چیت‌شیت استفاده شود.</p>
+    </header>
+
+    <section>
+      <h2>۱) پیش‌نیازها (حداقلی)</h2>
+      <ul class="checklist">
+        <li>یک VPC با دو ساب‌نت خصوصی در AZهای متفاوت: <code>ingestion-private-a</code> (1a) و <code>ingestion-private-b</code> (1b)</li>
+        <li>VPC Endpoints: <span class="pill">Gateway: DynamoDB</span> <span class="pill">Interface: CloudWatch Logs</span> (Private DNS روشن)</li>
+        <li>Security Group لامبدا: خروجی <code>TCP 443</code> باز</li>
+        <li>IAM Role لامبدا: <span class="pill">AWSLambdaBasicExecutionRole</span> + <span class="pill">AWSLambdaVPCAccessExecutionRole</span> + InlinePolicy برای جدول</li>
+        <li>DynamoDB Table: <code>FeedbackTable</code> با <code>PK=id (String)</code> و <code>SK=message (String)</code> (On-demand + PITR)</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۲) ساخت جدول DynamoDB</h2>
+      <ol>
+        <li>Console ⟶ <b>DynamoDB</b> ⟶ <b>Tables</b> ⟶ <b>Create table</b></li>
+        <li><b>Table name:</b> <code>FeedbackTable</code> | <b>Partition key:</b> <code>id</code> (String) | <b>Sort key:</b> <code>message</code> (String)</li>
+        <li><b>Billing mode:</b> On-demand | <b>PITR:</b> On | <b>Create</b></li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>۳) IAM Role (کمینه)</h2>
+      <p>یک رول برای Lambda بسازید و پالیسی زیر را به‌صورت <b>Inline</b> به آن اضافه کنید (حساب/نام جدول را مطابق خودتان تغییر دهید):</p>
+      <pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DDBTableWriteReadSpecific",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:DescribeTable"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:&lt;ACCOUNT_ID&gt;:table/FeedbackTable"
+    }
+  ]
+}</code></pre>
+      <p class="hint">اگر برای تمرین اولیه می‌خواهید سریع جلو بروید، می‌توانید موقتاً از پالیسی‌های آمادهٔ AmazonDynamoDBFullAccess استفاده کنید، ولی برای سناریوی مسابقه بهتر است حداقلی بمانید.</p>
+    </section>
+
+    <section>
+      <h2>۴) Endpointهای VPC</h2>
+      <details>
+        <summary><b>Gateway: DynamoDB</b></summary>
+        <ol>
+          <li>VPC ⟶ <b>Endpoints</b> ⟶ <b>Create endpoint</b></li>
+          <li>Service: <code>com.amazonaws.us-east-1.dynamodb</code> | Type: <b>Gateway</b></li>
+          <li>Route tables: جدول روت خصوصی VPC را انتخاب کنید</li>
+          <li><b>Create endpoint</b></li>
+        </ol>
+      </details>
+      <details>
+        <summary><b>Interface: CloudWatch Logs</b></summary>
+        <ol>
+          <li>Service: <code>com.amazonaws.us-east-1.logs</code> | Type: <b>Interface</b></li>
+          <li>Subnets: هر دو ساب‌نت خصوصی | SG: خروجی 443 باز | Private DNS: On</li>
+          <li><b>Create endpoint</b></li>
+        </ol>
+      </details>
+    </section>
+
+    <section>
+      <h2>۵) Lambda داخل VPC</h2>
+      <ol>
+        <li>Lambda ⟶ <b>Create function</b> ⟶ <b>Author from scratch</b>
+          <ul>
+            <li><b>Name:</b> <code>ingestion-fn</code> | <b>Runtime:</b> Python 3.12</li>
+            <li><b>Permissions:</b> Use existing role ⟶ رول بخش قبل</li>
+          </ul>
+        </li>
+        <li><b>Configuration ⟶ Environment variables</b> ⟶ <code>TABLE_NAME=FeedbackTable</code></li>
+        <li><b>Configuration ⟶ VPC ⟶ Edit</b> ⟶ VPC: Data-Ingestion-VPC | Subnets: هر دو خصوصی | SG: خروجی 443</li>
+      </ol>
+      <h3>کد نمونه (Handler: <code>lambda_function.lambda_handler</code>)</h3>
+      <pre><code>import os, json, boto3
+from datetime import datetime
+
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ.get("TABLE_NAME", "FeedbackTable"))
+
+def lambda_handler(event, context):
+    try:
+        body = event.get("body")
+        if event.get("isBase64Encoded"):
+            import base64
+            body = base64.b64decode(body).decode("utf-8")
+        data = json.loads(body or "{}")
+        _id = data.get("id"); msg = data.get("message")
+        if not _id or not msg:
+            return {"statusCode": 400, "body": "id و message الزامی‌اند"}
+        table.put_item(Item={"id": _id, "message": msg, "ts": datetime.utcnow().isoformat()})
+        return {"statusCode": 200, "body": "OK"}
+    except Exception as e:
+        return {"statusCode": 500, "body": f"ERR: {str(e)}"}
+</code></pre>
+      <p class="hint">بعد از ذخیره کد، حتماً <b>Deploy</b> بزنید.</p>
+    </section>
+
+    <section>
+      <h2>۶) API Gateway (REST) + اتصال به Lambda</h2>
+      <ol>
+        <li>API Gateway ⟶ <b>Create API</b> ⟶ <b>REST API (Build)</b> ⟶ Name: <code>ingestion-api</code></li>
+        <li><b>Resources</b> ⟶ روی <code>/</code> ⟶ <b>Create Resource</b> ⟶ Name: <code>ingest</code> (مسیر: <code>/ingest</code>)</li>
+        <li>روی <code>/ingest</code> ⟶ <b>Create Method</b> ⟶ <b>POST</b> ⟶ Integration: Lambda ⟶ Function: <code>ingestion-fn</code></li>
+        <li><b>Actions ⟶ Deploy API</b> ⟶ Stage: <code>prod</code></li>
+        <li><span class="info">Invoke URL</span> را بردارید: <code>https://&lt;api-id&gt;.execute-api.us-east-1.amazonaws.com/prod/ingest</code></li>
+      </ol>
+      <div class="sep"></div>
+      <h3>امنیت پیشنهادی (سریع)</h3>
+      <ul>
+        <li>WAF ⟶ Web ACL با Ruleهای مدیریت‌شده (SQLi/XSS/Common) + Anti-DDoS (با پیکربندی Sensitivity)</li>
+        <li>Stages ⟶ prod ⟶ Throttling (مثلاً 50 RPS / 100 Burst)</li>
+        <li>Access Logging برای Stage و CloudWatch Logs برای Lambda</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۷) تست</h2>
+      <button class="copy-btn" onclick="copy('curl1')">کپی curl</button>
+      <pre id="curl1"><code>curl -X POST "https://&lt;api-id&gt;.execute-api.us-east-1.amazonaws.com/prod/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"dev-001","message":"X7A-ALPHA"}'
+</code></pre>
+      <p>سپس در <b>DynamoDB ⟶ Explore table</b> آیتم را ببینید.</p>
+    </section>
+
+    <section>
+      <h2>۸) عیب‌یابی سریع</h2>
+      <ul>
+        <li><b class="err">Missing Authentication Token</b>: احتمالاً اسلش انتهای URL یا مسیر اشتباه است. از <code>/prod/ingest</code> بدون اسلش پایانی استفاده کنید. Deploy را هم فراموش نکنید.</li>
+        <li><b class="warn">403 / 404</b>: Stage اشتباه، متد (GET به جای POST)، یا Deploy نشدن.</li>
+        <li><b class="warn">500 از Lambda</b>: <code>CloudWatch Logs</code> را ببینید؛ معمولاً JSON ورودی نادرست یا مجوز DDB ناقص است.</li>
+        <li><b class="info">Timeout داخل VPC</b>: Endpointهای VPC (DynamoDB/Logs) یا SG خروجی 443 را بررسی کنید.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۹) نکات هزینه/امنیت</h2>
+      <ul>
+        <li><b>هزینه:</b> DynamoDB On-demand، Lambda بدون NAT (VPC Endpoints)، حداقل لاگ‌ها و Throttle منطقی</li>
+        <li><b>امنیت API:</b> WAF Managed Rules + Anti-DDoS (اول Count، بعد از پایش به Block/Challenge)</li>
+        <li><b>پایداری:</b> محدودکردن Concurrency لامبدا، آلارم‌های CloudWatch روی 5XX و Throttle</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۱۰) چک‌لیست نهایی Stage 1</h2>
+      <ul class="checklist">
+        <li>FeedbackTable با PK=id, SK=message ساخته شد</li>
+        <li>Endpointهای VPC: DynamoDB (Gateway) و Logs (Interface) فعال شدند</li>
+        <li>Lambda داخل VPC با Env=<code>TABLE_NAME</code> و Role کمینه</li>
+        <li>API Gateway: <code>/ingest</code> + POST + Deployment به <code>prod</code></li>
+        <li>WAF/Throttle/Logs فعال</li>
+        <li>تست curl موفق و آیتم در DynamoDB ثبت شد</li>
+      </ul>
+    </section>
+
+    <p class="hint">© راهنمای فشردهٔ Stage 1 – مناسب برای قرار دادن در چیت‌شیت شخصی</p>
+  </div>
+
+  <script>
+    function copy(id){
+      const el = document.getElementById(id);
+      const range = document.createRange();
+      range.selectNode(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      try{document.execCommand('copy');}catch(e){}
+      sel.removeAllRanges();
+    }
+  </script>
+</body>
+</html>
