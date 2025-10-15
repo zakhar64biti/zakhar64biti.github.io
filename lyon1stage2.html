@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WSC TP53 – Stage 2 (AWS Batch) – راهنمای کنسول</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#9ca3af; --text:#e5e7eb; --accent:#22c55e; --red:#ef4444; --yellow:#f59e0b; --blue:#3b82f6; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
+    header{background:linear-gradient(135deg,#0b1022,#0b172e);padding:24px;border:1px solid #1f2937;border-radius:16px}
+    h1{margin:0 0 8px;font-size:28px}
+    .tag{display:inline-block;margin-inline-end:8px;padding:4px 10px;border:1px solid #1f2937;border-radius:999px;color:var(--muted);font-size:12px}
+    .grid{display:grid;gap:16px}
+    @media (min-width:900px){.grid-2{grid-template-columns:1fr 1fr}}
+    section{background:var(--panel);border:1px solid #1f2937;border-radius:16px;padding:18px}
+    h2{margin:0 0 10px;font-size:20px}
+    h3{margin:16px 0 8px;font-size:16px;color:#cbd5e1}
+    p,li{line-height:1.8}
+    code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+    pre{background:#0b1220;border:1px solid #1f2937;border-radius:12px;padding:14px;overflow:auto}
+    .kbd{display:inline-block;border:1px solid #374151;background:#0b1220;border-radius:6px;padding:0 6px;font-size:12px}
+    .ok{color:var(--accent)} .warn{color:var(--yellow)} .err{color:var(--red)} .info{color:var(--blue)}
+    details{border:1px dashed #303b50;padding:12px;border-radius:12px;margin:10px 0}
+    summary{cursor:pointer;font-weight:600}
+    .checklist li{list-style:'✅ ';margin:6px 0;padding-inline-start:6px}
+    .hint{font-size:13px;color:var(--muted)}
+    .pill{display:inline-block;background:#0b1220;border:1px solid #1f2937;border-radius:999px;padding:4px 10px;margin:2px 6px 2px 0;font-size:12px;color:#cbd5e1}
+    .copy-btn{cursor:pointer;border:1px solid #374151;background:#0b1220;color:#cbd5e1;font-size:12px;padding:6px 10px;border-radius:8px;float:left}
+    .sep{height:1px;background:#1f2937;margin:18px -18px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Stage 2 – Data Preprocessing با AWS Batch (x86_64)</h1>
+      <div>
+        <span class="tag">منطقه: us-east-1</span>
+        <span class="tag">VPC: Data-Processing-VPC</span>
+        <span class="tag">Compute: AWS Batch (Managed EC2)</span>
+        <span class="tag">DB: RDS PostgreSQL (غیر Serverless)</span>
+      </div>
+      <p class="hint">این سند فقط برای Stage 2 است (طبق نیاز: اجرای باینری DataProcessingAPP بدون تغییر و نوشتن در RDS). نسخهٔ سریع با ساب‌نت پابلیک برای اولین اجرا آماده شده تا بدون پیچیدگی جواب بده؛ نسخهٔ تمام‌خصوصی هم پایین توضیح داده شده.</p>
+    </header>
+
+    <section>
+      <h2>۱) پیش‌نیازهای شبکه</h2>
+      <ul class="checklist">
+        <li>VPC: <code>Data-Processing-VPC</code> با CIDR پیشنهادی <code>10.20.0.0/16</code></li>
+        <li>ساب‌نت‌ها: <b>پابلیک:</b> <code>proc-public-a (10.20.1.0/24)</code>، <code>proc-public-b (10.20.2.0/24)</code> — <b>خصوصی:</b> <code>proc-private-a (10.20.11.0/24)</code>، <code>proc-private-b (10.20.12.0/24)</code></li>
+        <li>IGW متصل به VPC + Route برای پابلیک‌ها: <code>0.0.0.0/0 → IGW</code></li>
+        <li>RDS فقط در ساب‌نت‌های خصوصی</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۲) Security Groups</h2>
+      <ul>
+        <li><b>sg-rds-proc</b>: Inbound <code>5432</code> فقط از <b>sg-batch-ce</b> | Outbound آزاد/443</li>
+        <li><b>sg-batch-ce</b>: Inbound لازم نیست | Outbound <code>All</code> یا حداقل <code>TCP 443</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۳) RDS PostgreSQL (غیر Serverless)</h2>
+      <ol>
+        <li>RDS ⟶ <b>Create database</b> ⟶ Engine: PostgreSQL ⟶ Class: <code>db.t3.small</code></li>
+        <li><b>Public access:</b> No | <b>VPC:</b> Data-Processing-VPC | Subnet group: شامل دو خصوصی</li>
+        <li><b>SG:</b> sg-rds-proc | <b>Backup retention:</b> 14 روز | (Multi-AZ اختیاری/پیشنهادی)</li>
+        <li>بعد از Available شدن، Endpoint و Port را بردارید.</li>
+      </ol>
+      <details>
+        <summary>SQL ایجاد جدول (یک‌بار)</summary>
+        <pre><code>CREATE TABLE IF NOT EXISTS DataProcessingAPP (
+  id SERIAL PRIMARY KEY,
+  message VARCHAR(255)
+);</code></pre>
+        <p class="hint">این دستور را یا با Query Editor v2 یک‌بار اجرا کنید، یا اجازه دهید entrypoint به‌صورت ایمن همین کار را بکند.</p>
+      </details>
+    </section>
+
+    <section>
+      <h2>۴) Secrets Manager (کرِد دیتابیس)</h2>
+      <ol>
+        <li>Secrets Manager ⟶ <b>Store a new secret</b> ⟶ <b>Other type of secret</b> (JSON)</li>
+        <li>مقدار نمونه:</li>
+      </ol>
+      <pre><code>{
+  "username": "postgres",
+  "password": "StrongPass#123",
+  "host": "YOUR_RDS_ENDPOINT",
+  "port": 5432,
+  "dbname": "postgres"
+}</code></pre>
+      <ul>
+        <li>Name: <code>/tp53/day1/rds</code></li>
+        <li>ARN را نگه دارید (برای Job Definition لازم می‌شود).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۵) S3 (Asset های برنامه)</h2>
+      <ol>
+        <li>S3 ⟶ <b>Create bucket</b> (مثلاً: <code>tp53-day1-assets-YOURNAME</code>) – Region: us-east-1 – Private – Versioning: On</li>
+        <li>Upload: <code>DataProcessingAPP</code> و <code>config.ini</code></li>
+      </ol>
+      <h3>Policy لازم در Job Role برای خواندن از S3</h3>
+      <pre><code>{
+  "Effect": "Allow",
+  "Action": ["s3:GetObject"],
+  "Resource": ["arn:aws:s3:::tp53-day1-assets-YOURNAME/*"]
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>۶) ECR و ایمیج کانتینر</h2>
+      <ol>
+        <li>ECR ⟶ <b>Create repository</b> ⟶ Name: <code>dataprocessing-app</code></li>
+        <li>Dockerfile زیر را استفاده کنید (Amazon Linux 2 / x86_64):</li>
+      </ol>
+      <pre><code>FROM public.ecr.aws/amazonlinux/amazonlinux:2
+
+RUN yum update -y && \
+    yum install -y awscli tar gzip shadow-utils python3-pip procps-ng postgresql && \
+    yum clean all
+
+WORKDIR /app
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV ASSETS_BUCKET=tp53-day1-assets-YOURNAME \
+    DDB_TABLE=FeedbackTable
+
+ENTRYPOINT ["/entrypoint.sh"]
+</code></pre>
+      <h3>entrypoint.sh</h3>
+      <pre><code>#!/usr/bin/env bash
+set -euo pipefail
+
+: "${AWS_REGION:?Need AWS_REGION}"
+: "${DDB_TABLE:?Need DDB_TABLE}"
+: "${SECRET_ARN:?Need SECRET_ARN}"
+: "${ASSETS_BUCKET:?Need ASSETS_BUCKET}"
+: "${CONFIG_KEY:=config.ini}"
+
+mkdir -p /app/bin
+
+echo "[*] downloading binary and config..."
+aws s3 cp "s3://${ASSETS_BUCKET}/DataProcessingAPP" /app/bin/DataProcessingAPP --region "$AWS_REGION"
+aws s3 cp "s3://${ASSETS_BUCKET}/${CONFIG_KEY}" /app/config.ini --region "$AWS_REGION"
+chmod +x /app/bin/DataProcessingAPP
+
+echo "[*] fetching DB secret..."
+SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --region "$AWS_REGION" --query SecretString --output text)
+DB_HOST=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['host'])")
+DB_USER=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['username'])")
+DB_PASS=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['password'])")
+DB_NAME=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['dbname'])")
+DB_PORT=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['port'])")
+
+echo "[*] ensuring table exists..."
+PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
+"CREATE TABLE IF NOT EXISTS DataProcessingAPP (id SERIAL PRIMARY KEY, message VARCHAR(255));"
+
+echo "[*] starting DataProcessingAPP..."
+exec /app/bin/DataProcessingAPP \
+  --ddb-table "$DDB_TABLE" \
+  --db-host "$DB_HOST" --db-port "$DB_PORT" --db-name "$DB_NAME" \
+  --db-user "$DB_USER" --db-pass "$DB_PASS" \
+  --config /app/config.ini
+</code></pre>
+      <p class="hint">اگر باینری سوییچ متفاوت می‌خواهد، پارامترها را بر همان اساس تنظیم کنید.</p>
+    </section>
+
+    <section>
+      <h2>۷) IAM Roles برای Batch</h2>
+      <ol>
+        <li><b>AWSBatchServiceRole</b> (Service role)</li>
+        <li><b>ecsInstanceRole</b> (برای EC2 در Compute Environment) — Attach: <code>AmazonEC2ContainerServiceforEC2Role</code>, <code>AmazonEC2ContainerRegistryReadOnly</code>, (اختیاری: <code>CloudWatchAgentServerPolicy</code>)</li>
+        <li><b>batch-jobrole-processing</b> (Job role برای کانتینر) — حداقل‌ها:
+          <ul>
+            <li>DynamoDB: <code>GetItem, Query, Scan, DescribeTable</code> روی <code>FeedbackTable</code></li>
+            <li>Secrets Manager: <code>GetSecretValue</code> روی Secret دیتابیس</li>
+            <li>S3: <code>GetObject</code> روی باکت Asset</li>
+          </ul>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>۸) AWS Batch – Compute Environment</h2>
+      <ol>
+        <li>Batch ⟶ <b>Compute environments → Create</b>
+          <ul>
+            <li>Name: <code>ce-proc-ec2</code> | Orchestration: EC2 | Managed: On</li>
+            <li>Instance type: <code>t3.medium</code> | Min vCPU: 0 | Max vCPU: 8</li>
+            <li>Service role: <code>AWSBatchServiceRole</code> | EC2 instance role: <code>ecsInstanceRole</code></li>
+            <li>VPC: Data-Processing-VPC | Subnets: <b>پابلیک‌ها</b> | SG: <code>sg-batch-ce</code></li>
+          </ul>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>۹) Job Queue</h2>
+      <ol>
+        <li>Batch ⟶ <b>Job queues → Create</b>
+          <ul>
+            <li>Name: <code>jq-processing</code> | Priority: 1</li>
+            <li>Connected CE: <code>ce-proc-ec2</code> (Order=1)</li>
+          </ul>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>۱۰) Job Definition</h2>
+      <ol>
+        <li>Batch ⟶ <b>Job definitions → Create</b> | Type: Container | Platform: EC2</li>
+        <li>Image: <code>YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/dataprocessing-app:latest</code></li>
+        <li>vCPU: 1 | Memory: 2048</li>
+        <li><b>Job role:</b> <code>batch-jobrole-processing</code></li>
+        <li>Env vars:
+          <ul>
+            <li><code>AWS_REGION = us-east-1</code></li>
+            <li><code>DDB_TABLE = FeedbackTable</code></li>
+            <li><code>ASSETS_BUCKET = tp53-day1-assets-YOURNAME</code></li>
+            <li><code>SECRET_ARN = arn:aws:secretsmanager:us-east-1:...:secret:/tp53/day1/rds-xxxxx</code></li>
+            <li>(اختیاری) <code>CONFIG_KEY = config.ini</code></li>
+          </ul>
+        </li>
+        <li>Logs: AWS Logs (یک Log group تعیین کنید)</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>۱۱) Submit Job (تست)</h2>
+      <ol>
+        <li>Batch ⟶ <b>Jobs → Submit job</b>
+          <ul>
+            <li>Job name: <code>processing-test-1</code></li>
+            <li>Job definition: <code>jd-processing-app</code></li>
+            <li>Job queue: <code>jq-processing</code></li>
+          </ul>
+        </li>
+      </ol>
+      <p>وضعیت: <code>RUNNABLE → STARTING → RUNNING → SUCCEEDED/FAILED</code></p>
+      <p>CloudWatch Logs را برای خروجی entrypoint و برنامه بررسی کنید.</p>
+    </section>
+
+    <section>
+      <h2>۱۲) اتصال Batch به RDS (SG Rule حیاتی)</h2>
+      <p>اگر Job به دیتابیس وصل نشد/Timeout داد، در <b>sg-rds-proc</b> یک <b>Inbound</b> اضافه کنید:</p>
+      <pre><code>Type: PostgreSQL (5432)
+Source: sg-batch-ce
+</code></pre>
+      <p>دوباره Job را Submit کنید.</p>
+    </section>
+
+    <section>
+      <h2>۱۳) نسخهٔ Private-only (پس از اولین موفقیت)</h2>
+      <ul>
+        <li>Compute Environment را به ساب‌نت‌های خصوصی منتقل کنید.</li>
+        <li>VPC Endpoints لازم: <b>S3 (Gateway)</b>، <b>ECR (ecr.api, ecr.dkr)</b>، <b>CloudWatch Logs</b>، <b>Secrets Manager</b> (و در صورت نیاز KMS)</li>
+        <li>مسیرهای اینترنتی را حذف و امنیت/هزینه را بهینه کنید.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۱۴) عیب‌یابی سریع</h2>
+      <ul>
+        <li><b class="warn">Job روی RUNNABLE گیر می‌کند:</b> CE ظرفیت نیاورده (vCPU/EC2 limits)، Subnet/SG اشتباه، یا AMI/Agent مشکل دارد.</li>
+        <li><b class="err">CannotPullContainerError:</b> دسترسی ECR یا اینترنت/Endpoints مشکل دارد.</li>
+        <li><b class="err">timeout به RDS:</b> SG 5432 از sg-batch-ce به sg-rds-proc باز نیست، یا Endpoint/Port اشتباه است.</li>
+        <li><b class="warn">PermissionDenied برای Secrets/S3/DDB:</b> Policyهای Job Role ناقص‌اند.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۱۵) نکات هزینه/امنیت</h2>
+      <ul>
+        <li><b>هزینه:</b> Min/Desired vCPU را پایین نگه دارید؛ CloudWatch Logs را سطحی فعال کنید؛ سایز RDS کوچک.</li>
+        <li><b>امنیت:</b> Principle of Least Privilege برای Job Role؛ RDS غیر عمومی؛ Secrets Manager به‌جای Env ثابت.</li>
+        <li><b>پایداری:</b> Multi-AZ برای RDS (در صورت امکان)؛ Retry policy برای Job Definition.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۱۶) چک‌لیست نهایی Stage 2</h2>
+      <ul class="checklist">
+        <li>VPC با ۲ پابلیک (Batch) + ۲ خصوصی (RDS)</li>
+        <li>RDS Postgres + Backup 14 روز + (اختیاری) Multi-AZ</li>
+        <li>Secret: <code>/tp53/day1/rds</code> با host/user/pass/db</li>
+        <li>S3 با <code>DataProcessingAPP</code> و <code>config.ini</code></li>
+        <li>ECR repo + ایمیج (Dockerfile/entrypoint آماده)</li>
+        <li>IAM: <code>AWSBatchServiceRole</code>، <code>ecsInstanceRole</code>، <code>batch-jobrole-processing</code> با مجوزهای سطل/Secret/DDB</li>
+        <li>Batch: CE + Job Queue + Job Definition</li>
+        <li>SG: RDS 5432 ← sg-batch-ce</li>
+        <li>Job SUCCEEDED و رکوردها در <code>DataProcessingAPP</code> ثبت شد</li>
+      </ul>
+    </section>
+
+    <p class="hint">© راهنمای فشردهٔ Stage 2 – مناسب برای قرار دادن در چیت‌شیت شخصی</p>
+  </div>
+</body>
+</html>
