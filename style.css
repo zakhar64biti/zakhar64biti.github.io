@@ -237,3 +237,7 @@ ul.steps li::before {
   }
 
   /* end */
+
+  .img{
+    width: 100%;
+  }

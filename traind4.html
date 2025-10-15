@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Train Day4</h1>
+     <details class="note" style="padding: 20px !important;">
+        <summary>
+            action
+        </summary>
+        <ul class="steps">
+            <li>
+        <div class="code-box"><code class="copyable">
+import json
+import boto3
+import os
+
+sqs = boto3.client('sqs')
+
+DOWNLOAD_QUEUE_URL = os.getenv("DOWNLOAD_QUEUE_URL")
+RESIZE_QUEUE_URL = os.getenv("RESIZE_QUEUE_URL")
+
+def lambda_handler(event, context):
+    body = json.loads(event["body"])
+    url = body.get("url")
+    action = body.get("action")
+
+    if not url or not action:
+        return {"statusCode": 400, "body": "❌ url یا action ارسال نشده"}
+
+    if action == "download":
+        queue_url = DOWNLOAD_QUEUE_URL
+    elif action == "resize":
+        queue_url = RESIZE_QUEUE_URL
+    else:
+        return {"statusCode": 400, "body": "❌ action فقط باید download یا resize باشد"}
+
+    # ارسال پیام به صف
+    sqs.send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps({"url": url, "action": action})
+    )
+
+    return {"statusCode": 200, "body": f"✅ پیام {action} ارسال شد"}
+           </code></div>
+            </li>
+        </ul>
+     </details>
+
+       <details class="note" style="padding: 20px !important;">
+        <summary>
+            resize
+        </summary>
+        <ul class="steps">
+            <li>
+        <div class="code-box"><code class="copyable">
+import boto3
+import json
+import requests
+from PIL import Image
+from io import BytesIO
+import os
+
+s3 = boto3.client('s3')
+bucket_name = os.environ['BUCKET_NAME']
+
+def lambda_handler(event, context):
+    for record in event['Records']:
+        msg = json.loads(record['body'])
+        url = msg['url']
+
+        response = requests.get(url)
+        image = Image.open(BytesIO(response.content))
+        image = image.resize((100, 100))
+
+        buffer = BytesIO()
+        image.save(buffer, 'JPEG')
+        buffer.seek(0)
+
+        filename = url.split('/')[-1]
+        new_name = f"resized_{filename}"
+
+        s3.upload_fileobj(buffer, bucket_name, new_name)
+
+    return {"statusCode": 200, "body": "✅ تصاویر resize و ذخیره شدند"}
+
+           </code></div>
+            </li>
+        </ul>
+     </details>
+
+            <details class="note" style="padding: 20px !important;">
+        <summary>
+            protection
+        </summary>
+        <ul class="steps">
+            <li>
+        <div class="code-box"><code class="copyable">
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowOwnerAll",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::381491846607:root" },
+      "Action": "SQS:*",
+      "Resource": "arn:aws:sqs:us-east-1:381491846607:download-queue"
+    },
+    {
+      "Sid": "DenyQueueDeletionForEveryone",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "sqs:DeleteQueue",
+      "Resource": "arn:aws:sqs:us-east-1:381491846607:download-queue"
+    }
+  ]
+}
+
+
+           </code></div>
+            </li>
+        </ul>
+     </details>
+</body>
+<script src="copy.js"></script>
+</html>

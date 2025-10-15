@@ -96,6 +96,14 @@ def lambda_handler(event, context):
 
            </code></div>
         </li>
+        <li>
+            <div class="code-box"><code class="copyable">
+curl -X POST "https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"dev-001","message":"X7A-ALPHA"}'
+
+            </code></div>
+        </li>
         </ul>
     </details>
 
@@ -124,6 +132,18 @@ def lambda_handler(event, context):
         <ul class="steps">
             <li>
                 endpoint ===> ssm   <p class="blink_me">Warning: This is an important message!</p>
+            </li>
+        </ul>
+     </details>
+
+
+    <details class="note" style="padding: 20px !important;">
+        <summary>
+            marking
+        </summary>
+        <ul class="steps">
+            <li>
+                <a style="color: red !important;" href="image/WSC2024_53_Cloud_Computing_marking_scheme.pdf">marking</a>
             </li>
         </ul>
      </details>
