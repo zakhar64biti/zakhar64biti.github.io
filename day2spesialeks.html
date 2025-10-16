@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+      <details class="note" style="padding: 20px !important;">
+        <summary>
+            eks yaml 
+        </summary>
+        <ul class="steps">
+            <li>
+            <div class="code-box"><code class="copyable">
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-deployment
+  labels:
+    app: hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello
+  template:
+    metadata:
+      labels:
+        app: hello
+    spec:
+      containers:
+        - name: hello
+          image: your-dockerhub-user/hello:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-service
+  labels:
+    app: hello
+spec:
+  selector:
+    app: hello
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stop-deployment
+  labels:
+    app: stop
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: stop
+  template:
+    metadata:
+      labels:
+        app: stop
+    spec:
+      containers:
+        - name: stop
+          image: your-dockerhub-user/stop:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stop-service
+  labels:
+    app: stop
+spec:
+  selector:
+    app: stop
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# حالا با Ingress مسیرها رو تنظیم می‌کنیم
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"  # اگه از ingress-nginx استفاده می‌کنی
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /hello
+            pathType: Prefix
+            backend:
+              service:
+                name: hello-service
+                port:
+                  number: 80
+          - path: /stop
+            pathType: Prefix
+            backend:
+              service:
+                name: stop-service
+                port:
+                  number: 80
+---
+# LoadBalancer برای دسترسی از بیرون
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-lb
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 80
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+            </code></div>
+            </li>
+        </ul>
+     </details>
+      <details class="note" style="padding: 20px !important;">
+        <summary>
+            ingress yaml true
+        </summary>
+        <ul class="steps">
+            <li>
+            <div class="code-box"><code class="copyable">
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+spec:
+  ingressClassName: nginx  # 👈 جایگزین annotation قدیمی
+  rules:
+    - http:
+        paths:
+          - path: /hello
+            pathType: Prefix
+            backend:
+              service:
+                name: hello-service
+                port:
+                  number: 80
+          - path: /stop
+            pathType: Prefix
+            backend:
+              service:
+                name: stop-service
+                port:
+                  number: 80
+
+            </code></div>
+            </li>
+        </ul>
+     </details>
+
+      <details class="note" style="padding: 20px !important;">
+        <summary>
+            docker bildix
+        </summary>
+        <ul class="steps">
+            <li>
+            <div class="code-box"><code class="copyable">
+                docker buildx build --platform linux/amd64,linux/arm64 -t 937420755527.dkr.ecr.us-east-1.amazonaws.com/hello:latest . 
+            </code></div>
+            </li>
+        </ul>
+     </details>
+
+</body>
+</html>
