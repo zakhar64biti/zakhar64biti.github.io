@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>راهنمای جامع اتصال AWS WAFv2 به سرویس‌های مختلف (CloudFront, ALB, API GW, AppSync, ...)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22d3ee; --ok:#34d399; --warn:#f59e0b; --err:#ef4444;
+      --code:#0b1220; --kbd:#1f2937; --border:#374151;
+    }
+    body{background:var(--bg);color:var(--text);font-family:IRANSans, Vazirmatn, Inter, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans Arabic", sans-serif;line-height:1.75;margin:0;padding:40px}
+    h1,h2,h3{line-height:1.3}
+    h1{font-size:28px;margin-top:0}
+    h2{font-size:22px;margin:28px 0 12px}
+    h3{font-size:18px;margin:22px 0 10px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .muted{color:var(--muted)}
+    .grid{display:grid;gap:12px}
+    @media (min-width:950px){ .grid-2{grid-template-columns:1fr 1fr} .grid-3{grid-template-columns:1fr 1fr 1fr} }
+    .pill{display:inline-block;padding:2px 10px;border-radius:999px;background:#0b1220;border:1px solid var(--border);font-size:12px;margin-left:6px}
+    .hr{height:1px;background:var(--border);margin:22px 0}
+    .steps ol{margin:0;padding-right:18px}
+    .steps li{margin:8px 0}
+    code,pre,kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace}
+    pre{background:var(--code);border:1px dashed var(--border);border-radius:12px;padding:14px;overflow:auto}
+    kbd{background:#1f2937;border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;padding:2px 6px}
+    .callout{border-right:4px solid var(--accent);padding:12px;border-radius:12px;background:rgba(34,211,238,.08);border:1px solid var(--border);margin:12px 0}
+    a{color:var(--accent);text-decoration:none}
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+    .tbl{width:100%;border-collapse:collapse}
+    .tbl th,.tbl td{border:1px solid var(--border);padding:10px;text-align:right}
+    .tbl th{background:#0b1220}
+  </style>
+</head>
+<body>
+
+  <h1>راهنمای جامع اتصال <span class="pill">AWS WAFv2</span> به سرویس‌های مختلف</h1>
+  <p class="muted">این راهنما مراحل کنسولی را برای اتصال WAF به CloudFront (Global) و سرویس‌های Regional (ALB، API Gateway REST، AppSync، Cognito User Pool، App Runner، Verified Access، Amplify) پوشش می‌دهد.</p>
+
+  <div class="card">
+    <h2>فهرست</h2>
+    <ol>
+      <li><a href="#matrix">ماتریس پشتیبانی و Scope</a></li>
+      <li><a href="#common">قدم‌های مشترک ساخت Web ACL</a></li>
+      <li><a href="#cloudfront">CloudFront (Global Scope)</a></li>
+      <li><a href="#alb">Application Load Balancer (Regional)</a></li>
+      <li><a href="#apigw">API Gateway (REST Stage – Regional)</a></li>
+      <li><a href="#appsync">AWS AppSync (Regional)</a></li>
+      <li><a href="#cognito">Amazon Cognito User Pool (Regional)</a></li>
+      <li><a href="#apprunner">AWS App Runner (Regional)</a></li>
+      <li><a href="#verified">AWS Verified Access (Regional)</a></li>
+      <li><a href="#amplify">AWS Amplify Hosting (Global via us-east-1)</a></li>
+      <li><a href="#logging">لاگ‌گیری و مانیتورینگ</a></li>
+      <li><a href="#troubleshoot">عیب‌یابی سریع</a></li>
+      <li><a href="#cleanup">پاک‌سازی منابع</a></li>
+    </ol>
+  </div>
+
+  <div id="matrix" class="card">
+    <h2>۱) ماتریس پشتیبانی و Scope</h2>
+    <table class="tbl">
+      <thead>
+        <tr><th>سرویس</th><th>Scope</th><th>نکتهٔ اتصال</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Amazon CloudFront</td><td>Global (ایجاد/مدیریت در <code>us-east-1</code>)</td><td>اتصال از داخل CloudFront (یا UpdateDistribution).</td></tr>
+        <tr><td>Application Load Balancer</td><td>Regional</td><td>Web ACL باید در همان Region ساخته شود، Association از WAF یا ALB.</td></tr>
+        <tr><td>API Gateway REST (Stage)</td><td>Regional</td><td>اتصال در سطح Stage (از API GW یا WAF).</td></tr>
+        <tr><td>AWS AppSync (GraphQL API)</td><td>Regional</td><td>Association با ARN خود API از WAF یا AppSync.</td></tr>
+        <tr><td>Amazon Cognito User Pool</td><td>Regional</td><td>محافظت از Hosted UI/Endpoints با Web ACL هم‌ریجن.</td></tr>
+        <tr><td>AWS App Runner</td><td>Regional</td><td>Association از WAF به سرویس App Runner.</td></tr>
+        <tr><td>AWS Verified Access</td><td>Regional</td><td>Association از WAF به VA Instance.</td></tr>
+        <tr><td>AWS Amplify (Hosting)</td><td>Global (از طریق <code>us-east-1</code>)</td><td>WAFv2 برای Amplify در us-east-1 مدیریت می‌شود.</td></tr>
+      </tbody>
+    </table>
+    <p class="callout"><b>نکته:</b> برای <b>HTTP API</b> در API Gateway، بهترین الگوی رایج این است که API را پشت CloudFront قرار دهید و WAF را روی CloudFront ببندید.</p>
+  </div>
+
+  <div id="common" class="card steps">
+    <h2>۲) قدم‌های مشترک ساخت Web ACL (پیشنهادی)</h2>
+    <ol>
+      <li>کنسول → <b>AWS WAF</b> → <b>Web ACLs</b> → <b>Create web ACL</b></li>
+      <li><b>Name:</b> مثلا <code>ws-waf-main</code> | <b>Scope:</b> 
+        <ul>
+          <li><b>CloudFront</b> برای توزیع‌ها (Global، در <code>us-east-1</code>)</li>
+          <li><b>Regional</b> برای ALB, API GW, AppSync, Cognito, App Runner, Verified Access</li>
+        </ul>
+      </li>
+      <li><b>Default action:</b> Allow (ابتدا)</li>
+      <li><b>Rules:</b> Managed Rule Groups پیشنهاد‌شده:
+        <ul>
+          <li><code>AWSManagedRulesCommonRuleSet</code> (CRS)</li>
+          <li><code>AWSManagedRulesKnownBadInputsRuleSet</code></li>
+          <li><code>AWSManagedRulesAmazonIpReputationList</code></li>
+          <li><code>AWSManagedRulesSQLiRuleSet</code> (در صورت نیاز)</li>
+        </ul>
+      </li>
+      <li>(اختیاری) <b>Rate-based rule</b> برای محدودکردن Flood (مثلا 2000 درخواست/5 دقیقه برای هر IP)</li>
+      <li><b>Create web ACL</b></li>
+    </ol>
+  </div>
+
+  <div id="cloudfront" class="card steps">
+    <h2>۳) CloudFront (Global)</h2>
+    <p class="muted">Web ACL با Scope = <b>CloudFront</b> (مدیریت از <code>us-east-1</code>)</p>
+    <ol>
+      <li>کنسول → <b>CloudFront</b> → توزیع موردنظر → <b>Settings</b> یا <b>Security</b>.</li>
+      <li><b>Web Application Firewall (WAF)</b> → انتخاب Web ACL (CloudFront scope) → <b>Save</b>.</li>
+      <li>(اختیاری) <b>One-click protection</b> را از CloudFront امتحان کن.</li>
+    </ol>
+    <p class="callout">برای CloudFront، اتصال از داخل CloudFront/UpdateDistribution انجام می‌شود، نه از API <code>AssociateWebACL</code>.</p>
+  </div>
+
+  <div id="alb" class="card steps">
+    <h2>۴) Application Load Balancer (Regional)</h2>
+    <ol>
+      <li>Web ACL با Scope = <b>Regional</b> و در همان Region ALB بساز.</li>
+      <li>اتصال (یکی را انتخاب کن):
+        <ul>
+          <li><b>از WAF:</b> Web ACL → تب <b>Associations</b> → <b>Add association</b> → Resource: <b>ALB</b> → انتخاب ALB → <b>Add</b>.</li>
+          <li><b>از ALB:</b> EC2 → <b>Load Balancers</b> → انتخاب ALB → تب/بخش WAF → <b>Associate web ACL</b>.</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+
+  <div id="apigw" class="card steps">
+    <h2>۵) API Gateway (REST – Stage، Regional)</h2>
+    <ol>
+      <li>Web ACL با Scope = <b>Regional</b> در همان Region بساز.</li>
+      <li>اتصال به <b>Stage</b>:
+        <ul>
+          <li><b>از API Gateway:</b> API → <b>Stages</b> → انتخاب Stage (مثل <code>prod</code>) → <b>Associate web ACL</b>.</li>
+          <li><b>از WAF:</b> Web ACL → <b>Associations</b> → <b>Add association</b> → Resource: <b>API Gateway</b> → انتخاب API/Stage.</li>
+        </ul>
+      </li>
+      <li class="callout"><b>HTTP API:</b> الگوی مرسوم: قرار دادن HTTP API پشت CloudFront و بستن WAF روی CloudFront.</li>
+    </ol>
+  </div>
+
+  <div id="appsync" class="card steps">
+    <h2>۶) AWS AppSync (GraphQL API – Regional)</h2>
+    <ol>
+      <li>Web ACL با Scope = <b>Regional</b> در همان Region AppSync بساز.</li>
+      <li>اتصال:
+        <ul>
+          <li><b>از WAF:</b> Web ACL → تب <b>Associations</b> → <b>Add association</b> → Resource: <b>AppSync</b> → انتخاب GraphQL API.</li>
+          <li>(یا) از CLI/SDK با <code>AssociateWebACL</code> و ARN AppSync.</li>
+        </ul>
+      </li>
+      <li>Ruleهای نرخ‌محور و بدنه/پِیلود را مطابق الگوی ترافیک GraphQL تنظیم کن.</li>
+    </ol>
+  </div>
+
+  <div id="cognito" class="card steps">
+    <h2>۷) Amazon Cognito User Pool (Regional)</h2>
+    <ol>
+      <li>Web ACL با Scope = <b>Regional</b> در همان Region User Pool بساز.</li>
+      <li>WAF → Web ACL → <b>Associations</b> → <b>Add association</b> → Resource: <b>Cognito user pool</b> → انتخاب User Pool.</li>
+      <li>برای محافظت از Hosted UI و Endpointهای احراز هویت مفید است.</li>
+    </ol>
+  </div>
+
+  <div id="apprunner" class="card steps">
+    <h2>۸) AWS App Runner (Regional)</h2>
+    <ol>
+      <li>Web ACL با Scope = <b>Regional</b> در همان Region سرویس App Runner بساز.</li>
+      <li>WAF → Web ACL → <b>Associations</b> → Resource: <b>App Runner service</b> → انتخاب سرویس.</li>
+    </ol>
+  </div>
+
+  <div id="verified" class="card steps">
+    <h2>۹) AWS Verified Access (Regional)</h2>
+    <ol>
+      <li>Web ACL با Scope = <b>Regional</b> در همان Region Verified Access بساز.</li>
+      <li>WAF → Web ACL → <b>Associations</b> → Resource: <b>Verified Access instance</b> → انتخاب Instance.</li>
+    </ol>
+  </div>
+
+  <div id="amplify" class="card steps">
+    <h2>۱۰) AWS Amplify (Hosting)</h2>
+    <p class="muted">برای Amplify/CloudFront، مدیریت WAF از <code>us-east-1</code> انجام می‌شود.</p>
+    <ol>
+      <li>Web ACL با Scope = <b>CloudFront</b> ایجاد کن (در <code>us-east-1</code>).</li>
+      <li>از کنسول Amplify یا CloudFront، Web ACL را به توزیع مربوطه وصل کن.</li>
+    </ol>
+  </div>
+
+  <div id="logging" class="card steps">
+    <h2>۱۱) لاگ‌گیری و مانیتورینگ</h2>
+    <ol>
+      <li>WAF → Web ACL → تب <b>Logging and metrics</b> → <b>Enable logging</b>.</li>
+      <li>مقصد: <b>CloudWatch Logs</b> (ساده) یا <b>Kinesis Firehose → S3</b> (آرشیو/آنالیز).</li>
+      <li>برای Production، Ruleها را ابتدا در حالت <b>Count</b> تست/تیون کن سپس <b>Block</b>.</li>
+    </ol>
+  </div>
+
+  <div id="troubleshoot" class="card">
+    <h2>۱۲) عیب‌یابی سریع</h2>
+    <ul>
+      <li><b>اثر نمی‌بینی؟</b> Scope و Region را چک کن (CloudFront=Global/us-east-1، بقیه=Regional/هم‌ریجن).</li>
+      <li><b>API GW REST:</b> مطمئن شو به <b>Stage درست</b> وصل کردی و همان Stage را Invoke می‌کنی.</li>
+      <li><b>Block زیاد:</b> حالت <b>Count</b> + بررسی لاگ → سپس تغییر به <b>Block</b>.</li>
+      <li><b>Flood:</b> Rule نرخ‌محور per-IP اضافه کن و عدد را تدریجی تیون کن.</li>
+    </ul>
+  </div>
+
+  <div id="cleanup" class="card">
+    <h2>۱۳) پاک‌سازی</h2>
+    <ol>
+      <li>از WAF/سرویس مقصد، <b>Disassociate</b> انجام بده.</li>
+      <li>Web ACL را اگر لازم نیست <b>Delete</b> کن.</li>
+      <li>Log destinationهایی مثل CloudWatch/Firehose/S3 را در صورت عدم نیاز حذف/غیرفعال کن.</li>
+    </ol>
+  </div>
+
+  <div class="hr"></div>
+  <p class="muted">تهیه‌شده برای تمرین کنسول AWS — هر جا گیر کردی، اسم سرویس و ریجن را بگو تا قدم‌به‌قدم جلو برویم ✌️</p>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>راهنمای گام‌به‌گام: NLB و ALB داخلی (Internal) در کنسول AWS</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22d3ee; --ok:#34d399; --warn:#f59e0b; --err:#ef4444;
+      --code:#0b1220; --kbd:#1f2937; --border:#374151;
+    }
+    body{background:var(--bg);color:var(--text);font-family:IRANSans, Vazirmatn, Inter, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans Arabic", sans-serif;line-height:1.75;margin:0;padding:40px}
+    h1,h2,h3{line-height:1.3}
+    h1{font-size:28px;margin-top:0}
+    h2{font-size:22px;margin:28px 0 12px}
+    h3{font-size:18px;margin:22px 0 10px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .muted{color:var(--muted)}
+    .steps ol{margin:0;padding-right:18px}
+    .steps li{margin:8px 0}
+    .pill{display:inline-block;padding:2px 10px;border-radius:999px;background:#0b1220;border:1px solid var(--border);font-size:12px;margin-left:6px}
+    .hr{height:1px;background:var(--border);margin:22px 0}
+    code,pre,kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace}
+    pre{background:var(--code);border:1px dashed var(--border);border-radius:12px;padding:14px;overflow:auto}
+    kbd{background:#1f2937;border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;padding:2px 6px}
+    .callout{border-right:4px solid var(--accent);padding:12px;border-radius:12px;background:rgba(34,211,238,.08);border:1px solid var(--border);margin:12px 0}
+    a{color:var(--accent);text-decoration:none}
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+    .tbl{width:100%;border-collapse:collapse}
+    .tbl th,.tbl td{border:1px solid var(--border);padding:10px;text-align:right}
+    .tbl th{background:#0b1220}
+  </style>
+</head>
+<body>
+
+  <h1>راهنمای ساخت <span class="pill">Network Load Balancer (NLB)</span> و <span class="pill">ALB داخلی (Internal)</span></h1>
+  <p class="muted">Region پیشنهادی: <b>us-east-1</b>. همه‌چیز ۱۰۰٪ از داخل کنسول AWS. ابتدا پیش‌نیازهای مشترک را ببین، سپس هر سناریو را اجرا کن.</p>
+
+  <div class="card">
+    <h2>فهرست</h2>
+    <ol>
+      <li><a href="#prereq">پیش‌نیازهای مشترک</a></li>
+      <li><a href="#nlb">بخش A: Network Load Balancer (NLB)</a></li>
+      <li><a href="#alb-internal">بخش B: Application Load Balancer (داخلی/Internal)</a></li>
+      <li><a href="#compare">مقایسه سریع NLB vs ALB داخلی</a></li>
+      <li><a href="#cleanup">پاک‌سازی منابع</a></li>
+    </ol>
+  </div>
+
+  <div id="prereq" class="card">
+    <h2>۱) پیش‌نیازهای مشترک</h2>
+    <table class="tbl">
+      <thead><tr><th>مورد</th><th>توضیح</th></tr></thead>
+      <tbody>
+        <tr><td>VPC</td><td>حداقل ۲ Subnet در ۲ AZ. برای NLB و ALB داخلی هر دو لازم است.</td></tr>
+        <tr><td>Targets</td><td>EC2/کِنتینر/سرویس شما باید روی پورتی مثل 80/8080/5000 گوش دهد. برای NLB می‌تواند TCP/UDP/TLS باشد.</td></tr>
+        <tr><td>Security Group</td><td><b>ALB</b> خودش SG دارد. <b>NLB</b> SG ندارد؛ SG باید روی Targetها تنظیم شود.</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>دموی سریع وب‌سرور روی Amazon Linux (هر EC2)</summary>
+      <pre><code>sudo dnf -y update
+sudo dnf -y install nginx
+echo "&lt;h1&gt;Hello from $(hostname)&lt;/h1&gt;" | sudo tee /usr/share/nginx/html/index.html
+sudo systemctl enable --now nginx</code></pre>
+    </details>
+  </div>
+
+  <!-- ===================== N L B ===================== -->
+  <div id="nlb" class="card">
+    <h2>۲) بخش A — ساخت Network Load Balancer (NLB)</h2>
+    <p class="muted">NLB در لایه ۴ کار می‌کند: <b>TCP/UDP/TLS</b>، latency پایین، توان عبوری بالا. مناسب gRPC/TLS passthrough یا termination.</p>
+
+    <div class="card steps">
+      <h3>A-1) ساخت Target Group برای NLB</h3>
+      <ol>
+        <li>کنسول → <b>EC2</b> → منوی چپ: <b>Target Groups</b> → <b>Create target group</b>.</li>
+        <li><b>Target type:</b> Instances (یا IP/ALB بسته به معماری)</li>
+        <li><b>Name:</b> <code>nlb-tg</code></li>
+        <li><b>Protocol:</b> TCP (برای HTTP هم می‌توان TCP گذاشت) | <b>Port:</b> 80</li>
+        <li><b>Health checks:</b> 
+          <ul>
+            <li>برای TCP: Health check protocol = TCP (ساده‌ترین)</li>
+            <li>اگر اپ HTTP است و می‌خواهی چک سطح بالا: Protocol = HTTP، Path = <code>/</code></li>
+          </ul>
+        </li>
+        <li><b>Create</b> → سپس تب <b>Targets</b> → <b>Register targets</b> → انتخاب EC2ها → <b>Include as pending</b> → <b>Register</b>.</li>
+      </ol>
+    </div>
+
+    <div class="card steps">
+      <h3>A-2) ساخت NLB</h3>
+      <ol>
+        <li>EC2 → <b>Load Balancers</b> → <b>Create load balancer</b> → انتخاب <b>Network Load Balancer</b>.</li>
+        <li><b>Name:</b> <code>my-nlb</code> | <b>Scheme:</b> بسته به نیاز:
+          <ul>
+            <li><b>Internet-facing</b> برای دسترسی عمومی</li>
+            <li><b>Internal</b> برای ترافیک فقط داخل VPC</li>
+          </ul>
+        </li>
+        <li><b>IP address type:</b> IPv4</li>
+        <li><b>Network mapping:</b> VPC و حداقل ۲ Subnet را انتخاب کن.</li>
+        <li><b>Listeners:</b> 
+          <ul>
+            <li>Listener روی پورت 80 با Protocol = TCP ایجاد کن → <b>Default action:</b> Forward به <code>nlb-tg</code></li>
+            <li>(اختیاری) Listener <b>TLS/443</b> بساز و گواهی ACM را انتخاب کن (Termination روی NLB).</li>
+          </ul>
+        </li>
+        <li><b>Create load balancer</b>. چند لحظه صبر کن تا <span class="ok">Active</span> شود.</li>
+      </ol>
+      <p class="callout"><b>یادآوری امنیتی:</b> NLB خودش Security Group ندارد؛ مطمئن شو SGِ Targetها ترافیک از ساب‌نت‌های NLB یا CIDRهای لازم را مجاز می‌کند.</p>
+    </div>
+
+    <div class="card">
+      <h3>A-3) تست سریع</h3>
+      <ol>
+        <li>در صفحه NLB، <b>DNS name</b> را بردار.</li>
+        <li>اگر Listener = TCP: 
+          <pre><code>curl -i http://&lt;nlb-dns&gt;:80</code></pre>
+          (اگر پشتش HTTP است، پاسخ صفحه را می‌بینی.)
+        </li>
+        <li>اگر Listener = TLS/443 و Termination روی NLB:
+          <pre><code>curl -vk https://&lt;nlb-dns&gt;</code></pre>
+        </li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h3>A-4) نکات حرفه‌ای NLB</h3>
+      <ul>
+        <li><b>UDP</b>: برای DNS/VoIP و… Target Group با Protocol = UDP و Listener UDP بساز.</li>
+        <li><b>TLS Passthrough</b>: اگر نمی‌خواهی در NLB Terminate کنی، از Listener TCP استفاده کن و TLS را اپلیکیشن/Target مدیریت کند.</li>
+        <li><b>Health Check پیشرفته</b>: برای اپ‌های HTTP بهتر است HC را HTTP/HTTPS با Path تنظیم کنی.</li>
+        <li><b>Cross-Zone</b>: از تب Attributes در NLB یا TG فعال کن (توزیع یکنواخت بین AZها).</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- =============== A L B   I N T E R N A L =============== -->
+  <div id="alb-internal" class="card">
+    <h2>۳) بخش B — ساخت Application Load Balancer داخلی (Internal)</h2>
+    <p class="muted">ALB داخلی فقط درون VPC (یا از طریق VPN/Direct Connect/Peering) قابل دسترسی است. برای اپ‌های وب/HTTP(S) با روتینگ لایه ۷ و Ruleهای Path/Host ایده‌آل است.</p>
+
+    <div class="card steps">
+      <h3>B-1) Target Group (HTTP)</h3>
+      <ol>
+        <li>EC2 → <b>Target Groups</b> → <b>Create target group</b>.</li>
+        <li><b>Target type:</b> Instances | <b>Name:</b> <code>alb-int-tg</code></li>
+        <li><b>Protocol:</b> HTTP | <b>Port:</b> 80</li>
+        <li><b>Health checks:</b> Protocol = HTTP، Path = <code>/</code>، Healthy/Unhealthy threshold = 2</li>
+        <li><b>Create</b> → تب <b>Targets</b> → Register → دو EC2 خصوصی را اضافه کن.</li>
+      </ol>
+    </div>
+
+    <div class="card steps">
+      <h3>B-2) ساخت ALB داخلی</h3>
+      <ol>
+        <li>EC2 → <b>Load Balancers</b> → <b>Create load balancer</b> → <b>Application Load Balancer</b>.</li>
+        <li><b>Name:</b> <code>my-alb-internal</code> | <b>Scheme:</b> <b>Internal</b> | <b>IP address type:</b> IPv4</li>
+        <li><b>Network mapping:</b> VPC و <b>Subnetهای خصوصی</b> را انتخاب کن (Route به NAT Gateway برای دسترسی خروجی مفید است).</li>
+        <li><b>Security groups:</b> یک SG برای ALB بساز که ورودی HTTP/80 را از شبکه‌های داخلی (CIDRهای سازمانی/VPC) اجازه دهد.</li>
+        <li><b>Listeners and routing:</b> Listener HTTP/80 → <b>Forward</b> به <code>alb-int-tg</code></li>
+        <li><b>Create load balancer</b> → منتظر <span class="ok">Active</span> بمان.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h3>B-3) تست داخلی</h3>
+      <ol>
+        <li>DNS داخلی ALB را بردار (الان فقط از داخل VPC قابل دسترسی است).</li>
+        <li>از یک EC2 Bastion یا ماشین داخل همان VPC:
+          <pre><code>curl -i http://&lt;alb-internal-dns&gt;</code></pre>
+        </li>
+        <li>(اختیاری) اگر نام دامنه‌ی خصوصی می‌خواهی، در <b>Route 53 Private Hosted Zone</b> یک A-record (alias) به ALB بده.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h3>B-4) نکات حرفه‌ای ALB داخلی</h3>
+      <ul>
+        <li><b>HTTPS داخلی</b>: با ACM گواهی داخلی صادر کن، Listener 443 اضافه کن، HTTP→HTTPS Redirect بساز.</li>
+        <li><b>Path/Host-based Routing</b>: برای چند اپ: <code>/app1/* → TG1</code> و <code>/app2/* → TG2</code> یا براساس Hostname.</li>
+        <li><b>Sticky Sessions</b>: اگر اپ stateful است، در TG → Attributes → Stickiness فعال کن.</li>
+        <li><b>WAF</b>: می‌تونی WAF (Regional) را مستقیم به ALB داخلی Associate کنی.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>B-5) عیب‌یابی رایج</h3>
+      <ul>
+        <li><b>Timeout</b>: Route Table/NACL/SG را چک کن. اگر کلاینت خارج VPC است، باید تونل (VPN/Direct Connect) داشته باشی.</li>
+        <li><b>5xx از ALB</b>: Targetها <span class="err">unhealthy</span> هستند یا سرویس وب داون است.</li>
+        <li><b>نام‌حل نمی‌شود</b>: از داخل شبکه خصوصی تست کن یا رکورد Private Route53 بساز.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div id="compare" class="card">
+    <h2>۴) مقایسه سریع NLB vs ALB داخلی</h2>
+    <table class="tbl">
+      <thead><tr><th>موضوع</th><th>NLB</th><th>ALB داخلی</th></tr></thead>
+      <tbody>
+        <tr><td>لایه</td><td>L4 (TCP/UDP/TLS)</td><td>L7 (HTTP/HTTPS، Host/Path rules)</td></tr>
+        <tr><td>Latency/Throughput</td><td>بسیار پایین/بسیار بالا</td><td>نرمال وب</td></tr>
+        <tr><td>Security Group روی LB</td><td>ندارد (SG روی Targetها)</td><td>دارد (SG روی خود ALB)</td></tr>
+        <tr><td>Use-case</td><td>gRPC، دیتابیس پروکسی، TCP/UDP سرویس‌ها</td><td>وب‌اپ چندمسیره، میکروسرویس HTTP</td></tr>
+        <tr><td>Health Check</td><td>TCP/HTTP/HTTPS</td><td>HTTP/HTTPS (جزییات لایه ۷)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="cleanup" class="card">
+    <h2>۵) پاک‌سازی</h2>
+    <ol>
+      <li>EC2 → <b>Load Balancers</b> → NLB/ALB را انتخاب و <b>Delete</b> کن.</li>
+      <li>EC2 → <b>Target Groups</b> → TGها را <b>Delete</b> کن.</li>
+      <li>در صورت نیاز EC2ها و رکوردهای Route53 را هم پاک کن.</li>
+    </ol>
+  </div>
+
+  <div class="hr"></div>
+  <p class="muted">تهیه‌شده برای تمرین کنسول AWS — اگر خواستی نسخهٔ گام‌به‌گام با اسکرین‌شات هم برات آماده می‌کنم، یا سناریوی NLB (TLS termination) + ALB داخلی زنجیره‌ای.</p>
+</body>
+</html>

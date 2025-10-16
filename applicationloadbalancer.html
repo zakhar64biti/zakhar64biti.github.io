@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>راهنمای گام‌به‌گام ساخت Application Load Balancer (ALB) در کنسول AWS</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22d3ee; --ok:#34d399; --warn:#f59e0b; --err:#ef4444;
+      --code:#0b1220; --kbd:#1f2937; --border:#374151;
+    }
+    body{background:var(--bg);color:var(--text);font-family:IRANSans, Vazirmatn, Inter, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans Arabic", sans-serif;line-height:1.75;margin:0;padding:40px}
+    h1,h2,h3{line-height:1.3}
+    h1{font-size:28px;margin-top:0}
+    h2{font-size:22px;margin:28px 0 12px}
+    h3{font-size:18px;margin:22px 0 10px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .muted{color:var(--muted)}
+    .steps ol{margin:0;padding-right:18px}
+    .steps li{margin:8px 0}
+    .pill{display:inline-block;padding:2px 10px;border-radius:999px;background:#0b1220;border:1px solid var(--border);font-size:12px;margin-left:6px}
+    .hr{height:1px;background:var(--border);margin:22px 0}
+    code,pre,kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace}
+    pre{background:var(--code);border:1px dashed var(--border);border-radius:12px;padding:14px;overflow:auto}
+    kbd{background:#1f2937;border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;padding:2px 6px}
+    .callout{border-right:4px solid var(--accent);padding:12px;border-radius:12px;background:rgba(34,211,238,.08);border:1px solid var(--border);margin:12px 0}
+    a{color:var(--accent);text-decoration:none}
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+    .tbl{width:100%;border-collapse:collapse}
+    .tbl th,.tbl td{border:1px solid var(--border);padding:10px;text-align:right}
+    .tbl th{background:#0b1220}
+  </style>
+</head>
+<body>
+
+  <h1>ساخت <span class="pill">Application Load Balancer (ALB)</span> در کنسول AWS</h1>
+  <p class="muted">سناریو: ترافیک HTTP روی پورت 80 بین دو EC2 وب‌سرور توزیع شود، با Health Check و تست نهایی.</p>
+
+  <div class="card">
+    <h2>فهرست</h2>
+    <ol>
+      <li><a href="#prereq">پیش‌نیازها</a></li>
+      <li><a href="#tg">ساخت Target Group</a></li>
+      <li><a href="#alb">ساخت ALB</a></li>
+      <li><a href="#hc">Health Check و وضعیت Targetها</a></li>
+      <li><a href="#test">تست نهایی</a></li>
+      <li><a href="#troubleshoot">عیب‌یابی سریع</a></li>
+      <li><a href="#advanced">نکات حرفه‌ای (HTTPS، Path-based، Sticky، لاگ)</a></li>
+      <li><a href="#cleanup">پاک‌سازی منابع</a></li>
+    </ol>
+  </div>
+
+  <div id="prereq" class="card">
+    <h2>۱) پیش‌نیازها</h2>
+    <table class="tbl">
+      <thead><tr><th>مورد</th><th>توضیح</th></tr></thead>
+      <tbody>
+        <tr><td>VPC</td><td>حداقل ۲ Subnet در ۲ AZ (برای ALB اینترنت-فیسینگ بهتر است Subnetها Public باشند).</td></tr>
+        <tr><td>دو EC2</td><td>روی هرکدام وب‌سرور (NGINX/Apache) روی پورت 80 در حال اجرا.</td></tr>
+        <tr><td>Security Group</td><td>برای ALB: ورودی HTTP/80 از اینترنت. برای EC2: ورودی 80 از SGِ ALB.</td></tr>
+        <tr><td>Region</td><td>همهٔ منابع در یک Region (مثلاً <code>us-east-1</code>).</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>نصب سریع NGINX روی Amazon Linux 2023 (روی هر EC2)</summary>
+      <pre><code>sudo dnf -y update
+sudo dnf -y install nginx
+echo "&lt;h1&gt;Hello from $(hostname)&lt;/h1&gt;" | sudo tee /usr/share/nginx/html/index.html
+sudo systemctl enable --now nginx
+sudo systemctl status nginx
+</code></pre>
+    </details>
+  </div>
+
+  <div id="tg" class="card steps">
+    <h2>۲) ساخت Target Group (Instances)</h2>
+    <ol>
+      <li>کنسول → <b>EC2</b> → منوی چپ: <b>Target Groups</b> → <b>Create target group</b>.</li>
+      <li><b>Target type:</b> Instances</li>
+      <li><b>Name:</b> <code>my-tg</code> | <b>Protocol:</b> HTTP | <b>Port:</b> 80</li>
+      <li><b>Health checks:</b> Protocol = HTTP، Path = <code>/</code>، Healthy/Unhealthy threshold = 2</li>
+      <li><b>Create</b> را بزن.</li>
+      <li>داخل همین Target Group → تب <b>Targets</b> → <b>Register targets</b> → هر دو EC2 را انتخاب کن → <b>Include as pending</b> → <b>Register</b>.</li>
+    </ol>
+  </div>
+
+  <div id="alb" class="card steps">
+    <h2>۳) ساخت Application Load Balancer</h2>
+    <ol>
+      <li>کنسول → <b>EC2</b> → <b>Load Balancers</b> → <b>Create load balancer</b> → <b>Application Load Balancer</b>.</li>
+      <li><b>Name:</b> <code>my-alb</code> | <b>Scheme:</b> Internet-facing | <b>IP address type:</b> IPv4</li>
+      <li><b>Network mapping:</b> VPC را انتخاب کن → حداقل ۲ Subnet در ۲ AZ انتخاب کن.</li>
+      <li><b>Security groups:</b> یک SG با Rule زیر به ALB بده:
+        <pre><code>Inbound: HTTP TCP 80  Source: 0.0.0.0/0</code></pre>
+      </li>
+      <li><b>Listeners and routing:</b>
+        <ul>
+          <li>Listener پورت 80/HTTP اضافه کن → <b>Default action:</b> Forward به <code>my-tg</code>.</li>
+        </ul>
+      </li>
+      <li><b>Create load balancer</b> → منتظر بمان تا Status شود <span class="ok">Active</span>.</li>
+    </ol>
+  </div>
+
+  <div id="hc" class="card">
+    <h2>۴) Health Check و وضعیت Targetها</h2>
+    <ol>
+      <li>کنسول → <b>Target Groups</b> → انتخاب <code>my-tg</code> → تب <b>Targets</b>.</li>
+      <li>وضعیت هر EC2 باید بعد از چند بار Probe به <span class="ok">healthy</span> برسد.</li>
+      <li>اگر <span class="err">unhealthy</span> شد:
+        <ul>
+          <li>پورت 80 روی EC2 باز است؟ NGINX بالا است؟</li>
+          <li>SGِ EC2 اجازهٔ ورودی از SGِ ALB را دارد؟</li>
+          <li>Health check path درست است؟ (<code>/</code>)</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+
+  <div id="test" class="card">
+    <h2>۵) تست نهایی</h2>
+    <ol>
+      <li>EC2 → <b>Load Balancers</b> → روی <code>my-alb</code> کلیک → <b>Details</b> → <b>DNS name</b> را کپی کن.</li>
+      <li>در مرورگر باز کن یا با curl تست کن:
+        <pre><code>curl -i http://my-alb-1234567890.us-east-1.elb.amazonaws.com</code></pre>
+      </li>
+      <li>باید خروجی یکی از سرورها (مثل متن Hostname) را ببینی؛ با رفرش چندبار بین دو EC2 سوییچ می‌کند.</li>
+    </ol>
+  </div>
+
+  <div id="troubleshoot" class="card">
+    <h2>۶) عیب‌یابی سریع</h2>
+    <ul>
+      <li><b>HTTP 5xx از ALB:</b> Targetها unhealthy یا سرویس وب روی EC2 خاموش است.</li>
+      <li><b>Timeout:</b> Route Table/SG/NACL را چک کن؛ اگر Private هست NAT برای خروجی لازم است.</li>
+      <li><b>Forbidden/Access:</b> App-level (مثلاً NGINX) یا WAF (اگر متصل کردی) را بررسی کن.</li>
+      <li><b>DNS resolve نمی‌شود:</b> صبر کن تا Active شود؛ یا از داخل VPC تست می‌کنی و ALB خصوصی است؟</li>
+    </ul>
+  </div>
+
+  <div id="advanced" class="card">
+    <h2>۷) نکات حرفه‌ای</h2>
+    <h3>HTTPS (پورت 443)</h3>
+    <ol>
+      <li><b>ACM</b> → درخواست/ایمپورت گواهی دامنه (Public).</li>
+      <li>در ALB → <b>Listeners</b> → <b>Add listener</b> → HTTPS/443 → انتخاب Certificate از ACM → Default action: Forward به <code>my-tg</code>.</li>
+      <li>(اختیاری) HTTP→HTTPS Redirect: روی Listener 80 یک Rule <b>Redirect</b> به 443 بساز.</li>
+    </ol>
+
+    <h3>Path-based / Host-based Routing</h3>
+    <ul>
+      <li>در Listener 80/443 → <b>Rules</b> → مسیر <code>/app1/*</code> → TG1 و <code>/app2/*</code> → TG2.</li>
+      <li>برای ساب‌دامین‌ها (Host header) هم می‌توان Rule گذاشت (مثلاً <code>api.example.com</code>).</li>
+    </ul>
+
+    <h3>Sticky Sessions (Session Affinity)</h3>
+    <ol>
+      <li><b>Target Groups</b> → انتخاب TG → تب <b>Attributes</b>.</li>
+      <li><b>Stickiness</b> را فعال کن (Cookie App/ALB) و مدت ماندگاری را تنظیم کن.</li>
+    </ol>
+
+    <h3>Access Logs</h3>
+    <ol>
+      <li>ALB → تب <b>Attributes</b> → <b>Access logs</b> را فعال کن → مقصد S3 انتخاب کن.</li>
+      <li>برای تحلیل ترافیک و عیب‌یابی خیلی مفید است.</li>
+    </ol>
+
+    <h3>Cross-Zone Load Balancing</h3>
+    <p>برای توزیع یکسان ترافیک بین تمامی AZها (صرف‌نظر از تعداد Target در هر AZ) فعال کن؛ معمولاً پیشنهاد می‌شود.</p>
+  </div>
+
+  <div id="cleanup" class="card">
+    <h2>۸) پاک‌سازی (جلوگیری از هزینهٔ ناخواسته)</h2>
+    <ol>
+      <li>EC2 → <b>Load Balancers</b> → انتخاب <code>my-alb</code> → <b>Delete</b>.</li>
+      <li>EC2 → <b>Target Groups</b> → حذف <code>my-tg</code>.</li>
+      <li>در صورت تمرین، EC2ها را Stop/Terminate کن و S3 Access Logs (در صورت فعال‌سازی) را مدیریت کن.</li>
+    </ol>
+  </div>
+
+  <div class="hr"></div>
+  <p class="muted">تهیه‌شده برای تمرین کنسول AWS — اگر خواستی نسخهٔ NLB یا ALB خصوصی (Internal) هم برات جداگانه آماده می‌کنم.</p>
+</body>
+</html>
