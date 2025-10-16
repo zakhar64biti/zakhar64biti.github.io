@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WSC TP53 – Stage 3 (Data Extraction via AWS Batch) – راهنمای کنسول</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#9ca3af; --text:#e5e7eb; --accent:#22c55e; --red:#ef4444; --yellow:#f59e0b; --blue:#3b82f6; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
+    header{background:linear-gradient(135deg,#0b1022,#0b172e);padding:24px;border:1px solid #1f2937;border-radius:16px}
+    h1{margin:0 0 8px;font-size:28px}
+    .tag{display:inline-block;margin-inline-end:8px;padding:4px 10px;border:1px solid #1f2937;border-radius:999px;color:var(--muted);font-size:12px}
+    section{background:var(--panel);border:1px solid #1f2937;border-radius:16px;padding:18px;margin-bottom:16px}
+    h2{margin:0 0 10px;font-size:20px}
+    h3{margin:16px 0 8px;font-size:16px;color:#cbd5e1}
+    p,li{line-height:1.8}
+    code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+    pre{background:#0b1220;border:1px solid #1f2937;border-radius:12px;padding:14px;overflow:auto}
+    .checklist li{list-style:'✅ ';margin:6px 0;padding-inline-start:6px}
+    .hint{font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Stage 3 – Data Extraction با AWS Batch</h1>
+      <div>
+        <span class="tag">منطقه: us-east-1</span>
+        <span class="tag">VPC: Data-Extraction-VPC</span>
+        <span class="tag">منبع: RDS</span>
+        <span class="tag">مقصد: SSM Parameter Store</span>
+      </div>
+      <p class="hint">این مرحله باینری <b>DataExtractionAPP</b> را از S3 دریافت می‌کند، به RDS متصل می‌شود و دادهٔ نهایی را در <b>Parameter Store</b> ذخیره می‌کند. از AWS Batch (EC2 Managed) استفاده شده است.</p>
+    </header>
+
+    <section>
+      <h2>۱) شبکه و VPC</h2>
+      <ul class="checklist">
+        <li>VPC: <code>Data-Extraction-VPC (10.30.0.0/16)</code></li>
+        <li>ساب‌نت‌های پابلیک: <code>extract-public-a</code> و <code>extract-public-b</code></li>
+        <li>Internet Gateway متصل + Route <code>0.0.0.0/0 → IGW</code></li>
+      </ul>
+      <h3>Peering با Data-Processing-VPC</h3>
+      <ol>
+        <li>VPC Peering بین دو VPC بساز (10.30.0.0/16 ↔ 10.20.0.0/16)</li>
+        <li>در Route Table دو طرف اضافه کن:</li>
+      </ol>
+      <pre><code>Extraction RT → 10.20.0.0/16 → pcx-xxxx
+Processing RT → 10.30.0.0/16 → pcx-xxxx</code></pre>
+    </section>
+
+    <section>
+      <h2>۲) Security Groups</h2>
+      <ul>
+        <li><b>sg-batch-extract:</b> Outbound <code>443</code> و <code>5432</code> باز</li>
+        <li><b>sg-rds-proc:</b> Inbound <code>5432</code> از CIDR <code>10.30.0.0/16</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۳) S3 Assets</h2>
+      <p>در همان باکت <code>tp53-day1-assets-YOURNAME</code> فولدر جدیدی بساز و فایل‌ها را آپلود کن:</p>
+      <pre><code>s3://tp53-day1-assets-YOURNAME/extraction/DataExtractionAPP
+s3://tp53-day1-assets-YOURNAME/extraction/config.ini</code></pre>
+    </section>
+
+    <section>
+      <h2>۴) Secrets Manager (کرِد دیتابیس)</h2>
+      <p>از Secret مرحلهٔ قبل استفاده کنید (<code>/tp53/day1/rds</code>).</p>
+    </section>
+
+    <section>
+      <h2>۵) IAM Job Role برای Extraction</h2>
+      <pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue"],
+      "Resource": "arn:aws:secretsmanager:us-east-1:&lt;ACCOUNT_ID&gt;:secret:/tp53/day1/rds-*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ssm:PutParameter","ssm:GetParameter"],
+      "Resource": "arn:aws:ssm:us-east-1:&lt;ACCOUNT_ID&gt;:parameter/tp53/day1/final*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::tp53-day1-assets-YOURNAME/*"
+    }
+  ]
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>۶) Dockerfile و entrypoint.sh</h2>
+      <pre><code>FROM public.ecr.aws/amazonlinux/amazonlinux:2
+RUN yum update -y && \
+    yum install -y awscli postgresql python3-pip && \
+    yum clean all
+WORKDIR /app
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENV ASSETS_BUCKET=tp53-day1-assets-YOURNAME \
+    CONFIG_KEY=extraction/config.ini
+ENTRYPOINT ["/entrypoint.sh"]</code></pre>
+      <h3>entrypoint.sh</h3>
+      <pre><code>#!/usr/bin/env bash
+set -euo pipefail
+
+: "${AWS_REGION:?Need AWS_REGION}"
+: "${ASSETS_BUCKET:?Need ASSETS_BUCKET}"
+: "${SECRET_ARN:?Need SECRET_ARN}"
+: "${PARAM_NAME:?Need PARAM_NAME}"
+
+mkdir -p /app/bin
+aws s3 cp "s3://${ASSETS_BUCKET}/extraction/DataExtractionAPP" /app/bin/DataExtractionAPP
+aws s3 cp "s3://${ASSETS_BUCKET}/extraction/config.ini" /app/config.ini
+chmod +x /app/bin/DataExtractionAPP
+
+SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --query SecretString --output text)
+DB_HOST=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['host'])")
+DB_USER=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['username'])")
+DB_PASS=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['password'])")
+DB_NAME=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['dbname'])")
+DB_PORT=$(echo "$SECRET_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['port'])")
+
+/app/bin/DataExtractionAPP \
+  --db-host "$DB_HOST" --db-port "$DB_PORT" \
+  --db-name "$DB_NAME" --db-user "$DB_USER" --db-pass "$DB_PASS" \
+  --config /app/config.ini --out-param "$PARAM_NAME"
+</code></pre>
+    </section>
+
+    <section>
+      <h2>۷) AWS Batch</h2>
+      <h3>Compute Environment</h3>
+      <ul>
+        <li>Name: <code>ce-extract-ec2</code> | Type: EC2 Managed | Instance: <code>t3.medium</code></li>
+        <li>VPC: Data-Extraction-VPC | Subnets: پابلیک‌ها | SG: sg-batch-extract</li>
+      </ul>
+      <h3>Job Queue</h3>
+      <pre><code>Name: jq-extraction
+Connected CE: ce-extract-ec2</code></pre>
+      <h3>Job Definition</h3>
+      <pre><code>Name: jd-extraction-app
+Image: .../dataextraction-app:latest
+vCPU: 1 | Memory: 2048
+Job role: batch-jobrole-extraction
+Env:
+  AWS_REGION = us-east-1
+  ASSETS_BUCKET = tp53-day1-assets-YOURNAME
+  SECRET_ARN = arn:aws:secretsmanager:...:secret:/tp53/day1/rds-xxxxx
+  PARAM_NAME = /tp53/day1/final</code></pre>
+    </section>
+
+    <section>
+      <h2>۸) Submit Job و بررسی خروجی</h2>
+      <ol>
+        <li>Batch ⟶ Jobs ⟶ Submit job</li>
+        <li>Job definition: jd-extraction-app | Queue: jq-extraction</li>
+        <li>وضعیت: RUNNABLE → STARTING → RUNNING → SUCCEEDED</li>
+        <li>CloudWatch Logs را بررسی کنید.</li>
+      </ol>
+      <p>در پایان، در <b>Systems Manager → Parameter Store</b> مقدار <code>/tp53/day1/final</code> باید ایجاد شده باشد.</p>
+    </section>
+
+    <section>
+      <h2>۹) خطاهای رایج</h2>
+      <ul>
+        <li><b>Timeout به RDS:</b> مسیر Peering یا Rule 5432 درست نیست.</li>
+        <li><b>AccessDenied Secrets/S3/SSM:</b> پالیسی Role ناقص است.</li>
+        <li><b>CannotPullContainerError:</b> دسترسی به ECR یا اینترنت ندارد.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۱۰) نسخه خصوصی (اختیاری)</h2>
+      <ul>
+        <li>Compute Env در ساب‌نت خصوصی + حذف IGW</li>
+        <li>ایجاد Endpoints: <b>S3</b>, <b>ECR</b>, <b>Secrets Manager</b>, <b>SSM</b>, <b>Logs</b></li>
+        <li>بهینه‌سازی هزینه و امنیت.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>۱۱) چک‌لیست نهایی Stage 3</h2>
+      <ul class="checklist">
+        <li>Data-Extraction-VPC + Peering با Processing</li>
+        <li>SG و Route دوطرفه 5432 برقرار</li>
+        <li>S3 حاوی DataExtractionAPP و config.ini</li>
+        <li>Secret دیتابیس آماده</li>
+        <li>Job Role با دسترسی به Secret, SSM, S3</li>
+        <li>Batch: CE + Queue + Definition</li>
+        <li>Job SUCCEEDED و پارامتر در Parameter Store ثبت شد</li>
+      </ul>
+    </section>
+
+    <p class="hint">© راهنمای فشردهٔ Stage 3 – مناسب برای قرار دادن در چیت‌شیت شخصی</p>
+  </div>
+</body>
+</html>

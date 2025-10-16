@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>WSC2024 TP53 - Day2 - Stage 2 (ECS + Web/API + CI/CD)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee; --border:#1f2937; }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1100px;margin:32px auto;padding:16px}
+    h1{font-size:28px;margin:0 0 16px}
+    h2{font-size:22px;margin:24px 0 12px}
+    h3{font-size:18px;margin:16px 0 10px}
+    p,li{line-height:1.8}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin:14px 0}
+    .muted{color:var(--muted);font-size:13px}
+    .badge{display:inline-block;background:#10b981; color:#052015;padding:2px 8px;border-radius:999px;font-weight:700;font-size:12px}
+    .warn{display:inline-block;background:#f59e0b; color:#1a1305;padding:2px 8px;border-radius:999px;font-weight:700;font-size:12px}
+    .toc a{color:var(--accent);text-decoration:none}
+    .toc ul{margin:8px 0 0 0;padding:0 18px}
+    details{background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:10px 0}
+    details summary{cursor:pointer;font-weight:700}
+    code, pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px}
+    pre{background:#0b1320;border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto;position:relative;margin:10px 0}
+    .copy-btn{position:absolute;top:8px;left:8px;padding:6px 10px;border:1px solid var(--border);background:#0e1725;color:var(--text);border-radius:8px;cursor:pointer;font-size:12px}
+    .list-check li{margin-bottom:6px}
+    .kbd{border:1px solid var(--border);border-bottom-width:2px;padding:0 6px;border-radius:6px;background:#0e1725}
+    .two-col{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:860px){.two-col{grid-template-columns:1fr 1fr}}
+    .note{border-right:4px solid #22d3ee;padding-right:10px}
+    .ok{color:#34d399}
+    .err{color:#fb7185}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>WSC2024 TP53 — Day 2 — Stage 2 (وب‌سرویس‌ها + API + CI/CD روی ECS)</h1>
+    <p class="muted">Region: <b>us-east-1</b> | ممنوع: EKS | توصیه: ECS/Fargate + CodePipeline/CodeDeploy | دسترسی: SSM</p>
+
+    <div class="card toc">
+      <h3>فهرست</h3>
+      <ul>
+        <li><a href="#arch">معماری Stage 2</a></li>
+        <li><a href="#prep">آماده‌سازی دارایی‌ها (S3/ECR/Secrets)</a></li>
+        <li><a href="#ecs">ساخت ECS (Fargate) + ALB + Target Groups</a></li>
+        <li><a href="#tasks">Task Definitions (BP & Enterprise)</a></li>
+        <li><a href="#images">ایمیج‌ها: Dockerfile و کد FastAPI</a></li>
+        <li><a href="#cicd">CodePipeline/CodeBuild/CodeDeploy</a></li>
+        <li><a href="#logging">لاگ‌گذاری، مانیتورینگ و اتواسکیل</a></li>
+        <li><a href="#test">تست نهایی و مسیرها</a></li>
+      </ul>
+    </div>
+
+    <div id="arch" class="card">
+      <h2>معماری Stage 2</h2>
+      <p>دو سرویس روی ECS Fargate پشت یک ALB با مسیربندی:</p>
+      <ul>
+        <li><b>/bp/*</b> → سرویس Blood Pressure Web (خواندن JSON از <code>DynamoDB: cloudraiser-iot</code>)</li>
+        <li><b>/get_value</b> → سرویس Enterprise API (خواندن از <code>Aurora: enterprise_data</code>)</li>
+      </ul>
+      <p>CI/CD: CodePipeline → (Source: GitHub/S3) → CodeBuild (ساخت ایمیج و Push به ECR) → CodeDeploy (به‌روزرسانی سرویس ECS بدون قطعی).</p>
+    </div>
+
+    <div id="prep" class="card">
+      <h2>آماده‌سازی دارایی‌ها (S3 / ECR / Secrets)</h2>
+
+      <details open>
+        <summary>۱) کپی باینری مسابقه به S3 شخصی</summary>
+        <ol class="list-check">
+          <li>S3 → وارد باکت تمرینت شو (مثلاً <code>tp53-day2-artifacts-yourname</code>).</li>
+          <li>روی <b>Upload</b> بزن و فایل <code>stub1.zip</code> را از <i>s3://tp53-day2-game-assets-2024</i> دانلود و اینجا آپلود کن.</li>
+          <li class="muted">این فایل، وب‌سرویس آماده برای خواندن داده‌های DynamoDB را فراهم می‌کند (x86/AL2).</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>۲) ساخت مخازن ECR</summary>
+        <ol>
+          <li>ECR → <b>Create repository</b> → دو تا ریپو بساز:
+            <ul>
+              <li><code>bp-web</code> (برای وب سرویس فشار خون)</li>
+              <li><code>enterprise-api</code> (برای API آروّرا)</li>
+            </ul>
+          </li>
+          <li>Scan on push: <b>Enable</b> (اختیاری اما بهتر).</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>۳) Secrets Manager (اعتبار دیتابیس آروّرا)</summary>
+        <ol>
+          <li>Secrets Manager → <b>Store a new secret</b> → نوع: <b>Other type of secret</b>.</li>
+          <li>Key/Value:
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+DB_HOST=your-aurora-endpoint.rds.amazonaws.com
+DB_NAME=enterprise
+DB_USER=admin
+DB_PASSWORD=your-strong-pass
+            </code></pre>
+          </li>
+          <li>نام سکرت: <code>enterprise-db-credentials</code> → ذخیره.</li>
+        </ol>
+      </details>
+    </div>
+
+    <div id="ecs" class="card">
+      <h2>ECS Fargate + ALB + Target Groups</h2>
+
+      <details open>
+        <summary>۱) ساخت ECS Cluster</summary>
+        <ol>
+          <li>ECS → <b>Clusters</b> → <b>Create cluster</b>.</li>
+          <li>نام: <code>tp53-day2-cluster</code> → Networking: Default VPC → Create.</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>۲) ساخت ALB و Target Groupها</summary>
+        <ol>
+          <li>EC2 → Load Balancers → <b>Create Load Balancer</b> → نوع: <b>Application Load Balancer</b>.</li>
+          <li>Name: <code>tp53-day2-alb</code> | Scheme: Internet-facing | VPC: Default | Subnets: دو AZ.</li>
+          <li>Security Group: پورت 80 از Everywhere یا ترجیحاً <b>My IP</b> (برای تمرین).</li>
+          <li>ساخت دو Target Group (IP target):
+            <ul>
+              <li><code>tg-bp</code> → Port 8080 → Health path: <code>/health</code> (یا <code>/</code> اگر نداریم)</li>
+              <li><code>tg-enterprise</code> → Port 8081 → Health path: <code>/health</code> (یا <code>/</code>)</li>
+            </ul>
+          </li>
+          <li>Listener Rules (پورت 80):
+            <ul>
+              <li>مسیر <b>/bp/*</b> → Forward → <code>tg-bp</code></li>
+              <li>مسیر <b>/get_value</b> → Forward → <code>tg-enterprise</code></li>
+            </ul>
+          </li>
+        </ol>
+      </details>
+    </div>
+
+    <div id="tasks" class="card">
+      <h2>Task Definitions (Fargate)</h2>
+
+      <details open>
+        <summary>نقش‌های IAM برای Taskها</summary>
+        <ol>
+          <li>IAM → Roles → <b>Create role</b> → Use case: <b>ECS Task</b> (برای Fargate).</li>
+          <li>Role: <code>ecsTaskExecutionRole</code> + Policy: <code>AmazonECSTaskExecutionRolePolicy</code> (برای Pull از ECR و Logs).</li>
+          <li>Role دیگر: <code>ecsTaskRole-app</code> با Inline Policies:
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# اجازه خواندن DynamoDB برای سرویس BP
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DdbRead",
+      "Effect": "Allow",
+      "Action": ["dynamodb:GetItem","dynamodb:Query","dynamodb:Scan"],
+      "Resource": "arn:aws:dynamodb:us-east-1:*:table/cloudraiser-iot"
+    },
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream","logs:PutLogEvents"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Secrets",
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue"],
+      "Resource": "arn:aws:secretsmanager:us-east-1:*:secret:enterprise-db-credentials*"
+    }
+  ]
+}
+            </code></pre>
+          </li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>Task Definition برای BP Web (پورت 8080)</summary>
+        <ol>
+          <li>ECS → Task definitions → <b>Create</b> → Launch type: <b>Fargate</b>.</li>
+          <li>Task role: <code>ecsTaskRole-app</code> | Execution role: <code>ecsTaskExecutionRole</code>.</li>
+          <li>Container:
+            <ul>
+              <li>Image: <code>&lt;ECR_URL&gt;/bp-web:latest</code></li>
+              <li>Port mappings: <b>8080</b>/tcp</li>
+              <li>Env vars:
+                <ul>
+                  <li><code>TABLE_NAME=cloudraiser-iot</code></li>
+                  <li><code>AWS_REGION=us-east-1</code></li>
+                </ul>
+              </li>
+              <li>Log driver: awslogs → Group: <code>/ecs/bp-web</code> | Stream prefix: <code>bp</code> | Region: us-east-1</li>
+            </ul>
+          </li>
+          <li>Task size: 0.5 vCPU / 1GB RAM (برای تمرین).</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>Task Definition برای Enterprise API (پورت 8081)</summary>
+        <ol>
+          <li>Container:
+            <ul>
+              <li>Image: <code>&lt;ECR_URL&gt;/enterprise-api:latest</code></li>
+              <li>Port mappings: <b>8081</b>/tcp</li>
+              <li>Env vars (ترجیحاً از Secrets):
+                <ul>
+                  <li><code>SECRET_NAME=enterprise-db-credentials</code></li>
+                  <li><code>AWS_REGION=us-east-1</code></li>
+                </ul>
+              </li>
+              <li>Log driver: awslogs → Group: <code>/ecs/enterprise-api</code> | Stream prefix: <code>ent</code></li>
+            </ul>
+          </li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>ساخت سرویس‌های ECS و اتصال به ALB</summary>
+        <ol>
+          <li>ECS → Services → <b>Create</b> → Fargate → Cluster: <code>tp53-day2-cluster</code>.</li>
+          <li>Service 1: <b>bp-web-svc</b> → Desired tasks: 1 → Load balancer: Application → انتخاب ALB: <code>tp53-day2-alb</code></li>
+          <li>Container to load balance:
+            <ul>
+              <li>Container: bp-web | Port: 8080 | Target group: <code>tg-bp</code></li>
+            </ul>
+          </li>
+          <li>Service 2: <b>enterprise-api-svc</b> → Target group: <code>tg-enterprise</code> (پورت 8081)</li>
+          <li>Deployment type: Rolling update (یا CodeDeploy اگر CI/CD را کامل می‌سازی).</li>
+        </ol>
+      </details>
+    </div>
+
+    <div id="images" class="card">
+      <h2>ایمیج‌ها: Dockerfile و کد FastAPI</h2>
+
+      <details open>
+        <summary>الف) bp-web (اجرای باینری stub1 روی AL2)</summary>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# Dockerfile برای bp-web
+FROM amazonlinux:2
+RUN yum update -y && yum install -y unzip shadow-utils && yum clean all
+WORKDIR /app
+# فرض: stub1.zip کنار Dockerfile است
+COPY stub1.zip .
+RUN unzip stub1.zip && chmod +x ./server
+# پورت پیشفرض برنامه را اگر 8080 است اکسپوز کن
+EXPOSE 8080
+# متغیرها از ECS تزریق می‌شوند: TABLE_NAME, AWS_REGION
+CMD ["/app/server"]
+        </code></pre>
+        <p class="muted">نکته: نام باینری داخل zip ممکن است متفاوت باشد (مثلاً <code>server</code>). اگر health endpoint ندارد، health check ALB را روی <code>/</code> بگذار.</p>
+      </details>
+
+      <details open>
+        <summary>ب) enterprise-api (FastAPI برای Aurora)</summary>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# app/main.py
+import os, json
+from fastapi import FastAPI, HTTPException
+import uvicorn
+import pymysql
+import boto3
+
+app = FastAPI()
+
+def get_db_conf():
+    secret_name = os.getenv("SECRET_NAME","enterprise-db-credentials")
+    region = os.getenv("AWS_REGION","us-east-1")
+    sm = boto3.client("secretsmanager", region_name=region)
+    sec = sm.get_secret_value(SecretId=secret_name)["SecretString"]
+    conf = dict(x.split("=",1) for x in sec.splitlines())
+    return conf
+
+@app.get("/health")
+def health():
+    return {"status":"ok"}
+
+@app.get("/get_value")
+def get_value(id: str):
+    conf = get_db_conf()
+    conn = pymysql.connect(
+        host=conf["DB_HOST"], user=conf["DB_USER"], password=conf["DB_PASSWORD"],
+        database=conf["DB_NAME"], connect_timeout=5, cursorclass=pymysql.cursors.DictCursor
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM enterprise_data WHERE id=%s", (id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="id not found")
+            return row
+    finally:
+        conn.close()
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8081)
+        </code></pre>
+
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# Dockerfile برای enterprise-api
+FROM public.ecr.aws/lambda/python:3.11 as pydeps
+# مرحله نهایی: تصویر ساده آلپاین یا python-slim هم می‌شود؛ اینجا از python:3.11 استفاده می‌کنیم
+FROM python:3.11-slim
+WORKDIR /app
+COPY app/ /app/
+RUN pip install --no-cache-dir fastapi uvicorn pymysql boto3
+EXPOSE 8081
+ENV PYTHONUNBUFFERED=1
+CMD ["python","/app/main.py"]
+        </code></pre>
+      </details>
+    </div>
+
+    <div id="cicd" class="card">
+      <h2>CI/CD: CodePipeline + CodeBuild + CodeDeploy</h2>
+
+      <details open>
+        <summary>ساختار ریپو (پیشنهادی)</summary>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+repo-root/
+├─ bp-web/
+│  ├─ Dockerfile
+│  └─ stub1.zip
+├─ enterprise-api/
+│  ├─ Dockerfile
+│  └─ app/
+│     └─ main.py
+└─ buildspec.yml
+        </code></pre>
+      </details>
+
+      <details open>
+        <summary>buildspec.yml برای ساخت و Push به ECR</summary>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+version: 0.2
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    BP_REPO: bp-web
+    ENT_REPO: enterprise-api
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws --version
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - BP_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$BP_REPO
+      - ENT_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ENT_REPO
+      - aws ecr get-login-password | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+  build:
+    commands:
+      - echo Build bp-web...
+      - cd bp-web && docker build -t $BP_URI:latest . && cd ..
+      - echo Build enterprise-api...
+      - cd enterprise-api && docker build -t $ENT_URI:latest . && cd ..
+  post_build:
+    commands:
+      - docker push $BP_URI:latest
+      - docker push $ENT_URI:latest
+artifacts:
+  files:
+    - im-a-placeholder.txt
+        </code></pre>
+        <p class="muted">نکته: پس از Push موفق، CodePipeline می‌تواند با مرحله‌ی Deploy (CodeDeploy for ECS) سرویس‌ها را بدون قطعی به‌روزرسانی کند.</p>
+      </details>
+
+      <details>
+        <summary>CodePipeline (گام‌ها)</summary>
+        <ol>
+          <li>CodePipeline → <b>Create pipeline</b> → نام: <code>tp53-day2-pipeline</code>.</li>
+          <li>Source: GitHub یا S3.</li>
+          <li>Build: CodeBuild → محیط Ubuntu استاندارد → Service role با دسترسی ECR/ECS/Logs.</li>
+          <li>Deploy: <b>CodeDeploy</b> (نوع Deployment: ECS) یا مستقیم ECS deploy action.</li>
+          <li>برای CodeDeploy به AppSpec (JSON/YAML) نیاز داری (Map شدن سرویس/کانتینر به TaskDef جدید).</li>
+        </ol>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# appspec.yaml (نمونه خیلی خلاصه برای ECS)
+version: 1
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: "REPLACED_AT_DEPLOY_TIME"
+        LoadBalancerInfo:
+          ContainerName: "bp-web"
+          ContainerPort: 8080
+        PlatformVersion: "LATEST"
+        NetworkConfiguration:
+          AwsvpcConfiguration:
+            AssignPublicIp: ENABLED
+            Subnets: ["subnet-xxxx","subnet-yyyy"]
+            SecurityGroups: ["sg-xxxx"]
+        # برای سرویس enterprise-api فایل مشابه با ContainerName/Port خودش بساز
+        </code></pre>
+      </details>
+    </div>
+
+    <div id="logging" class="card">
+      <h2>لاگ‌گذاری، مانیتورینگ و مقیاس‌پذیری</h2>
+      <ul>
+        <li><b>CloudWatch Logs</b>: برای هر کانتینر یک Log group جداگانه (مثلاً <code>/ecs/bp-web</code> و <code>/ecs/enterprise-api</code>).</li>
+        <li><b>ALB Access Logs</b> → S3 (اختیاری اما عالی برای عیب‌یابی عملکرد).</li>
+        <li><b>Auto Scaling</b> در سرویس ECS:
+          <ul>
+            <li>Target tracking روی <b>CPUUtilization 60%</b> یا <b>RequestCountPerTarget</b> (نیاز به CloudWatch Metric).</li>
+          </ul>
+        </li>
+        <li><b>هشدارها</b>:
+          <ul>
+            <li>ECS Service: <span class="err">UnhealthyHostCount > 0</span></li>
+            <li>ALB 5xx Rate بالا</li>
+            <li>Latency بالا</li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+
+    <div id="test" class="card">
+      <h2>تست نهایی</h2>
+      <ol>
+        <li>DNS یا آدرس ALB را بردار (مانند: <code>http://tp53-day2-alb-xxxxxxxx.us-east-1.elb.amazonaws.com</code>).</li>
+        <li>مسیرها:
+          <ul>
+            <li><b>BP JSON</b> (مثال): <code>/bp/</code> یا طبق مستند باینری (اگر مسیر خاصی دارد). اگر فقط <code>/</code> است، Rule را روی <code>/bp/*</code> به <code>/</code> ریرایت کن (اختیاری).</li>
+            <li><b>Enterprise</b>: <code>/get_value?id=01</code> → باید یک JSON با فیلدهای <code>id, val1..val10</code> برگرداند.</li>
+          </ul>
+        </li>
+        <li>بررسی لاگ‌ها:
+          <ul>
+            <li>CloudWatch → Logs → <code>/ecs/bp-web</code> و <code>/ecs/enterprise-api</code></li>
+            <li>ALB Target Groups → تب <b>Targets</b> → سلامت Health checks</li>
+          </ul>
+        </li>
+      </ol>
+      <p class="muted">اگر 404 گرفتی: مسیر Listener Rule/Health path/Port mapping را چک کن. اگر 5xx: لاگ کانتینر و Role دسترسی به DynamoDB/Secrets را بررسی کن.</p>
+    </div>
+
+    <p class="muted">تمام شد ✅ — حالا Stage 3 (Well-Architected + مانیتورینگ و بهینه‌سازی) را هم اگر بخواهی به همین سبک آماده می‌کنم.</p>
+  </div>
+
+  <script>
+    function copyBlock(btn){
+      const pre = btn.parentElement;
+      const code = pre.querySelector('code');
+      const text = code.innerText;
+      navigator.clipboard.writeText(text).then(()=>{
+        const old = btn.innerText;
+        btn.innerText = "Copied!";
+        setTimeout(()=>btn.innerText=old,1200);
+      });
+    }
+  </script>
+</body>
+</html>

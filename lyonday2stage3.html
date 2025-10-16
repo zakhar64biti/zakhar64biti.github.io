@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>WSC2024 TP53 - Day2 - Stage 3 (Well-Architected + Monitoring + Cost)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee; --border:#1f2937 }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1100px;margin:32px auto;padding:16px}
+    h1{font-size:28px;margin:0 0 16px}
+    h2{font-size:22px;margin:24px 0 12px}
+    h3{font-size:18px;margin:16px 0 10px}
+    p,li{line-height:1.8}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin:14px 0}
+    .muted{color:var(--muted);font-size:13px}
+    .toc a{color:var(--accent);text-decoration:none}
+    .toc ul{margin:8px 0 0 0;padding:0 18px}
+    details{background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:10px 0}
+    details summary{cursor:pointer;font-weight:700}
+    code, pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px}
+    pre{background:#0b1320;border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto;position:relative;margin:10px 0}
+    .copy-btn{position:absolute;top:8px;left:8px;padding:6px 10px;border:1px solid var(--border);background:#0e1725;color:var(--text);border-radius:8px;cursor:pointer;font-size:12px}
+    .list-check li{margin-bottom:6px}
+    .kbd{border:1px solid var(--border);border-bottom-width:2px;padding:0 6px;border-radius:6px;background:#0e1725}
+    .two-col{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:860px){.two-col{grid-template-columns:1fr 1fr}}
+    .note{border-right:4px solid #22d3ee;padding-right:10px}
+    .ok{color:#34d399}.warn{color:#f59e0b}.err{color:#fb7185}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>WSC2024 TP53 — Day 2 — Stage 3 (Well-Architected + مانیتورینگ + بهینه‌سازی)</h1>
+    <p class="muted">Region: <b>us-east-1</b> | تمرکز: ۶ ستون Well-Architected (Operational Excellence, Security, Reliability, Performance Efficiency, Cost Optimization, Sustainability*) — در سند مسابقه «۶ ستون» ذکر شده است.</p>
+
+    <div class="card toc">
+      <h3>فهرست</h3>
+      <ul>
+        <li><a href="#oe">۱) Operational Excellence (عملیاتی)</a></li>
+        <li><a href="#sec">۲) Security (امنیت)</a></li>
+        <li><a href="#rel">۳) Reliability (قابلیت اتکا)</a></li>
+        <li><a href="#perf">۴) Performance Efficiency (کارایی)</a></li>
+        <li><a href="#cost">۵) Cost Optimization (هزینه)</a></li>
+        <li><a href="#sus">۶) Sustainability (پایداری/سبز)</a></li>
+        <li><a href="#dash">داشبورد CloudWatch آماده</a></li>
+        <li><a href="#alarms">آلارم‌های کلیدی</a></li>
+        <li><a href="#checklist">چک‌لیست نهایی امتیازگیری</a></li>
+      </ul>
+    </div>
+
+    <!-- 1) Operational Excellence -->
+    <div id="oe" class="card">
+      <h2>۱) Operational Excellence (عملیاتی)</h2>
+      <details open>
+        <summary>Runbook/Playbook و لاگ‌ها</summary>
+        <ol class="list-check">
+          <li><b>CloudWatch Logs</b> گروه‌ها:
+            <ul>
+              <li><code>/ecs/bp-web</code>، <code>/ecs/enterprise-api</code></li>
+              <li><code>/kinesis/blood-pressure-analytics</code></li>
+            </ul>
+          </li>
+          <li>برای هر سرویس، <b>Runbook</b> بساز: «اگر 5xx زیاد شد → بررسی Target group → بررسی لاگ کانتینر → Role/Secrets → Rollback آخرین دیپلوی».</li>
+          <li><b>CloudWatch Dashboards</b> برای KPIها (در انتهای این سند الگو آماده است).</li>
+          <li><b>Deployment strategy</b>: حداقل Rolling update؛ در CI/CD از CodeDeploy با <b>Blue/Green</b> استفاده کن.</li>
+        </ol>
+      </details>
+      <details>
+        <summary>Tracing و Request Logging</summary>
+        <ol>
+          <li>ALB Access Logs → S3 (اختیاری اما امتیاز دارد).</li>
+          <li>در اپ‌ها: لاگ JSON با فیلدهای <code>timestamp, path, ip, latency_ms, status</code>.</li>
+        </ol>
+      </details>
+    </div>
+
+    <!-- 2) Security -->
+    <div id="sec" class="card">
+      <h2>۲) Security (امنیت)</h2>
+      <details open>
+        <summary>Least-Privilege IAM</summary>
+        <p>Policy نمونه برای Task Role (DynamoDB فقط خواندن، Secrets فقط خواندن یک Secret):</p>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DdbReadOnly",
+      "Effect": "Allow",
+      "Action": ["dynamodb:GetItem","dynamodb:Query","dynamodb:Scan"],
+      "Resource": "arn:aws:dynamodb:us-east-1:*:table/cloudraiser-iot"
+    },
+    {
+      "Sid": "SecretReadOnly",
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue"],
+      "Resource": "arn:aws:secretsmanager:us-east-1:*:secret:enterprise-db-credentials*"
+    },
+    {
+      "Sid": "LogsWrite",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream","logs:PutLogEvents"],
+      "Resource": "*"
+    }
+  ]
+}
+        </code></pre>
+      </details>
+      <details>
+        <summary>شبکه، WAF و داده‌ها</summary>
+        <ul>
+          <li><b>Security Group</b>‌ها: ALB پورت 80 فقط از اینترنت؛ ECS فقط از ALB؛ RDS/Redshift فقط از IP خودت یا از ECS.</li>
+          <li><b>AWS WAF</b> روی ALB با Managed Rules (SQLi/XSS/IP reputation). نرخ‌محدودکننده (Rate-based) با حد پایین برای حفاظت.</li>
+          <li><b>Encryption</b>: 
+            <ul>
+              <li>DynamoDB, RDS, Redshift, S3 → Encryption at rest (پیش‌فرض KMS-managed).</li>
+              <li>In-transit: ALB → HTTP → (حداقل برای مسابقه اوکی)؛ اگر خواستی، ACM + HTTPS.</li>
+            </ul>
+          </li>
+          <li><b>Secrets Manager</b> برای کرِدنشیال‌ها، نه Env ثابت.</li>
+        </ul>
+      </details>
+    </div>
+
+    <!-- 3) Reliability -->
+    <div id="rel" class="card">
+      <h2>۳) Reliability (قابلیت اتکا)</h2>
+      <details open>
+        <summary>Backup & Restore</summary>
+        <ul>
+          <li><b>RDS Aurora</b>: Automated backups فعال (Retention ≥ 7 روز). Snapshot دستی روز مسابقه.</li>
+          <li><b>Redshift</b>: Snapshot زمان‌بندی‌شده؛ نگهداری حداقل ۳ روز.</li>
+          <li><b>DynamoDB</b>: TTL روشن (expireAt) + (اختیاری) PITR.</li>
+          <li><b>AWS Backup</b> (اختیاری): پلن بکاپ برای RDS/Redshift.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>Health & Auto Healing</summary>
+        <ul>
+          <li>ECS Service با حداقل DesiredCount=1 و HealthCheck ALB سالم.</li>
+          <li>Kinesis: آلارم روی <b>IteratorAgeHigh</b> و دسترسی به shard scaling.</li>
+        </ul>
+      </details>
+    </div>
+
+    <!-- 4) Performance -->
+    <div id="perf" class="card">
+      <h2>۴) Performance Efficiency (کارایی)</h2>
+      <details open>
+        <summary>مقیاس‌پذیری</summary>
+        <ul>
+          <li><b>ECS Service Auto Scaling</b>: Target tracking روی CPU 60% یا RequestCountPerTarget.</li>
+          <li><b>Kinesis</b>: اگر IteratorAge بالا رفت → افزایش shard (دستی) یا Automation ساده با Lambda.</li>
+          <li><b>DynamoDB</b>: On-demand انتخاب خوبی برای مسابقه است (یا Provisioned با AutoScaling).</li>
+        </ul>
+      </details>
+      <details>
+        <summary>Redshift و Queryها</summary>
+        <ul>
+          <li>WLM یا Concurrency Scaling لازم نیست، ولی <b>VACUUM/ANALYZE</b> دوره‌ای برای کارایی بهتر.</li>
+          <li>Distribution/Sort keys منطقی بر اساس Query-Pattern اگر زمان داشتی.</li>
+        </ul>
+      </details>
+    </div>
+
+    <!-- 5) Cost -->
+    <div id="cost" class="card">
+      <h2>۵) Cost Optimization (هزینه)</h2>
+      <details open>
+        <summary>Budgets + Lifecycle</summary>
+        <ul>
+          <li><b>AWS Budgets</b> با Alert ایمیل (مثلاً 10$).</li>
+          <li><b>S3 Lifecycle</b> برای لاگ‌ها/آرتیفکت‌ها (IA بعد 30 روز، Expire بعد 90).</li>
+          <li>Redshift تک‌نود کوچک، Aurora t3.small، ECS حداقل سایز؛ خاموش‌کردن منابع بعد تمرین.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>پیکربندی به‌صرفه</summary>
+        <ul>
+          <li>DynamoDB On-demand برای نوسانی بودن بار.</li>
+          <li>ALB فقط یک عدد برای هر دو سرویس (Path-based routing).</li>
+        </ul>
+      </details>
+    </div>
+
+    <!-- 6) Sustainability -->
+    <div id="sus" class="card">
+      <h2>۶) Sustainability (پایداری/سبز)</h2>
+      <ul>
+        <li>خاموش‌کردن محیط‌های غیرفعال، حذف Snapshotهای قدیمی، کاهش حجم لاگ‌ها.</li>
+        <li>استفاده از Instance/Task کوچک و AutoScaling پویا.</li>
+      </ul>
+    </div>
+
+    <!-- CloudWatch Dashboard -->
+    <div id="dash" class="card">
+      <h2>داشبورد CloudWatch (JSON آماده ایمپورت)</h2>
+      <p class="muted">CloudWatch → Dashboards → Create → Start with JSON → این JSON را پیست کن و نام بده: <code>tp53-day2-dashboard</code></p>
+      <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0, "y": 0, "width": 12, "height": 6,
+      "properties": {
+        "title": "ALB - 5xx & TargetResponseTime",
+        "metrics": [
+          [ "AWS/ApplicationELB", "HTTPCode_ELB_5XX_Count", "LoadBalancer", "tp53-day2-alb", { "stat":"Sum" } ],
+          [ ".", "TargetResponseTime", ".", ".", { "yAxis":"right", "stat":"p90" } ]
+        ],
+        "region": "us-east-1",
+        "view": "timeSeries",
+        "stacked": false
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 0, "width": 12, "height": 6,
+      "properties": {
+        "title": "ECS - CPU/Memory Utilization (bp-web)",
+        "metrics": [
+          [ "AWS/ECS", "CPUUtilization", "ClusterName", "tp53-day2-cluster", "ServiceName", "bp-web-svc", { "stat":"Average" } ],
+          [ ".", "MemoryUtilization", ".", ".", ".", ".", { "stat":"Average", "yAxis":"right" } ]
+        ],
+        "region": "us-east-1",
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 6, "width": 12, "height": 6,
+      "properties": {
+        "title": "Kinesis - IncomingRecords & IteratorAge",
+        "metrics": [
+          [ "AWS/Kinesis", "IncomingRecords", "StreamName", "blood-pressure-stream", { "stat":"Sum" } ],
+          [ ".", "GetRecords.IteratorAgeMilliseconds", ".", ".", { "yAxis":"right", "stat":"Average" } ]
+        ],
+        "region": "us-east-1",
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 6, "width": 12, "height": 6,
+      "properties": {
+        "title": "DynamoDB - Throttled & Read/Write",
+        "metrics": [
+          [ "AWS/DynamoDB", "ReadThrottleEvents", "TableName", "cloudraiser-iot", { "stat":"Sum" } ],
+          [ ".", "WriteThrottleEvents", ".", ".", { "stat":"Sum" } ],
+          [ ".", "ConsumedReadCapacityUnits", ".", ".", { "yAxis":"right", "stat":"Sum" } ],
+          [ ".", "ConsumedWriteCapacityUnits", ".", ".", { "yAxis":"right", "stat":"Sum" } ]
+        ],
+        "region": "us-east-1",
+        "view": "timeSeries"
+      }
+    }
+  ]
+}
+      </code></pre>
+    </div>
+
+    <!-- Alarms -->
+    <div id="alarms" class="card">
+      <h2>آلارم‌های کلیدی (Console گام‌به‌گام)</h2>
+      <details open>
+        <summary>۱) ALB 5xx زیاد</summary>
+        <ol>
+          <li>CloudWatch → Alarms → <b>Create alarm</b> → Select metric</li>
+          <li>AWS/ApplicationELB → Per AppELB Metrics → <b>HTTPCode_ELB_5XX_Count</b> (LoadBalancer: tp53-day2-alb)</li>
+          <li>Statistic: Sum | Period: 1m | Threshold: > 5 برای ۳ دوره</li>
+          <li>Action: Email SNS (Notification).</li>
+        </ol>
+      </details>
+      <details>
+        <summary>۲) ECS CPU بالا (bp-web-svc)</summary>
+        <ol>
+          <li>Metric: <b>AWS/ECS → CPUUtilization</b> (Cluster: tp53-day2-cluster, Service: bp-web-svc)</li>
+          <li>Threshold: > 70% برای ۵ دقیقه → اکشن اختیاری: Scale out +1 (Application Auto Scaling).</li>
+        </ol>
+      </details>
+      <details>
+        <summary>۳) Kinesis IteratorAge بالا</summary>
+        <ol>
+          <li>Metric: <b>AWS/Kinesis → GetRecords.IteratorAgeMilliseconds</b> برای stream: blood-pressure-stream</li>
+          <li>Threshold: > 30000ms (۳۰ ثانیه) برای ۵ دقیقه → نوتیفیکیشن.</li>
+        </ol>
+      </details>
+      <details>
+        <summary>۴) DynamoDB Throttled</summary>
+        <ol>
+          <li>Metric: <b>ReadThrottleEvents / WriteThrottleEvents</b> جدول cloudraiser-iot</li>
+          <li>Threshold: > 0 برای ۳ دوره → بررسی WCU/RCU یا On-Demand.</li>
+        </ol>
+      </details>
+    </div>
+
+    <!-- Final checklist -->
+    <div id="checklist" class="card">
+      <h2>چک‌لیست نهایی امتیازگیری</h2>
+      <ul>
+        <li>✓ Kinesis → KDA → DynamoDB (با TTL برای حذف > ۴۸ ساعت)</li>
+        <li>✓ Redshift (غیر Serverless) برای تحلیل تاریخی</li>
+        <li>✓ RDS Aurora برای Enterprise و API GET با امنیت مناسب</li>
+        <li>✓ ECS + ALB (Path-based)، لاگ‌گذاری CloudWatch</li>
+        <li>✓ آلارم‌ها: ALB 5xx، ECS CPU، Kinesis IteratorAge، DDB Throttle</li>
+        <li>✓ WAF روی ALB + Managed Rules + Rate limit</li>
+        <li>✓ Budgets + S3 Lifecycle + سایزینگ حداقلی</li>
+        <li>✓ Snapshot/Backup فعال برای RDS/Redshift</li>
+      </ul>
+      <p class="muted">بعد از مسابقه، منابع را پاک کن تا هزینه اضافه ایجاد نشود.</p>
+    </div>
+
+    <p class="muted">تمام ✅ — اگر خواستی، برای هر آلارم/داشبورد/اتواسکیل، نسخه CLI/CloudFormation هم می‌تونم اضافه کنم.</p>
+  </div>
+
+  <script>
+    function copyBlock(btn){
+      const pre = btn.parentElement;
+      const code = pre.querySelector('code');
+      const text = code.innerText;
+      navigator.clipboard.writeText(text).then(()=>{
+        const old = btn.innerText;
+        btn.innerText = "Copied!";
+        setTimeout(()=>btn.innerText=old,1200);
+      });
+    }
+  </script>
+</body>
+</html>

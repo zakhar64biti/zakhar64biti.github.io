@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>WSC2024 TP53 - Day2 - Stage 2 (Enterprise با Lambda + API GW)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee; --border:#1f2937; }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1100px;margin:32px auto;padding:16px}
+    h1{font-size:28px;margin:0 0 16px}
+    h2{font-size:22px;margin:24px 0 12px}
+    h3{font-size:18px;margin:16px 0 10px}
+    p,li{line-height:1.8}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin:14px 0}
+    .muted{color:var(--muted);font-size:13px}
+    .toc a{color:var(--accent);text-decoration:none}
+    .toc ul{margin:8px 0 0 0;padding:0 18px}
+    details{background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:10px 0}
+    details summary{cursor:pointer;font-weight:700}
+    code, pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px}
+    pre{background:#0b1320;border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto;position:relative;margin:10px 0}
+    .copy-btn{position:absolute;top:8px;left:8px;padding:6px 10px;border:1px solid var(--border);background:#0e1725;color:var(--text);border-radius:8px;cursor:pointer;font-size:12px}
+    .kbd{border:1px solid var(--border);border-bottom-width:2px;padding:0 6px;border-radius:6px;background:#0e1725}
+    .note{border-right:4px solid #22d3ee;padding-right:10px}
+    .ok{color:#34d399}.err{color:#fb7185}.warn{color:#f59e0b}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Stage 2 (مسیر Lambda + API Gateway برای Enterprise)</h1>
+    <p class="muted">Region: <b>us-east-1</b> | دیتابیس: <b>Aurora (Provisioned)</b> | EKS ممنوع | وب Blood Pressure همچنان روی <b>ECS + باینری</b></p>
+
+    <div class="card toc">
+      <h3>فهرست</h3>
+      <ul>
+        <li><a href="#arch">معماری</a></li>
+        <li><a href="#secrets">Secrets Manager (اعتبار DB)</a></li>
+        <li><a href="#ecr">ایجاد ECR و ساخت ایمیج Lambda</a></li>
+        <li><a href="#lambda">ایجاد Lambda از کانتینر + VPC</a></li>
+        <li><a href="#apigw">ایجاد API Gateway (HTTP API)</a></li>
+        <li><a href="#test">تست و دیباگ</a></li>
+        <li><a href="#bonus">بهبودها (RDS Proxy, WAF, Throttling)</a></li>
+      </ul>
+    </div>
+
+    <div id="arch" class="card">
+      <h2>معماری</h2>
+      <p>برای سرویس Enterprise:</p>
+      <pre><code>
+Client → API Gateway (HTTP API) → Lambda (Container Image: Python 3.11)
+                                   ↘ Secrets Manager (DB creds)
+                                     Aurora MySQL (Provisioned, داخل VPC)
+      </code></pre>
+      <p class="muted">وبِ فشار خون طبق Stage 2 اصلی: <b>ECS Fargate + باینری stub1</b> که از DynamoDB می‌خوانَد.</p>
+    </div>
+
+    <div id="secrets" class="card">
+      <h2>۱) Secrets Manager (اعتبار دیتابیس)</h2>
+      <details open>
+        <summary>ایجاد سکرت</summary>
+        <ol>
+          <li>Secrets Manager → <b>Store a new secret</b> → نوع: <b>Other type of secret</b></li>
+          <li>Key/Value را دقیقاً به شکل زیر بساز (هر کدام یک خط):</li>
+        </ol>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+DB_HOST=your-aurora-endpoint.rds.amazonaws.com
+DB_NAME=enterprise
+DB_USER=admin
+DB_PASSWORD=your-strong-pass
+        </code></pre>
+        <ol start="3">
+          <li>Name: <code>enterprise-db-credentials</code> → Create secret ✅</li>
+        </ol>
+      </details>
+    </div>
+
+    <div id="ecr" class="card">
+      <h2>۲) ECR و ساخت ایمیج Lambda</h2>
+      <details open>
+        <summary>ایجاد ریپو ECR</summary>
+        <ol>
+          <li>ECR → <b>Create repository</b> → Name: <code>enterprise-lambda</code> → Create ✅</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>کد Lambda (Python) و Dockerfile</summary>
+        <p class="note">این ایمیج با <b>پایهٔ رسمی Lambda Python 3.11</b> ساخته می‌شود و Handler استاندارد Lambda را برمی‌گرداند.</p>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# app/lambda_function.py
+import os, json
+import pymysql
+import boto3
+
+REGION = os.getenv("AWS_REGION", "us-east-1")
+SECRET_NAME = os.getenv("SECRET_NAME", "enterprise-db-credentials")
+
+secrets = boto3.client("secretsmanager", region_name=REGION)
+
+def get_db_conf():
+    sec = secrets.get_secret_value(SecretId=SECRET_NAME)["SecretString"]
+    return dict(line.split("=",1) for line in sec.splitlines())
+
+def get_conn(cfg):
+    return pymysql.connect(
+        host=cfg["DB_HOST"],
+        user=cfg["DB_USER"],
+        password=cfg["DB_PASSWORD"],
+        database=cfg["DB_NAME"],
+        connect_timeout=5,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+def lambda_handler(event, context):
+    # API Gateway HTTP API → queryStringParameters
+    q = (event.get("queryStringParameters") or {})
+    item_id = q.get("id")
+    if not item_id:
+        return {"statusCode": 400, "body": "id is required"}
+
+    try:
+        cfg = get_db_conf()
+        conn = get_conn(cfg)
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM enterprise_data WHERE id=%s", (item_id,))
+            row = cur.fetchone()
+    except Exception as e:
+        return {"statusCode": 500, "body": f"db error: {e}"}
+    finally:
+        try:
+            conn.close()
+        except:
+            pass
+
+    if not row:
+        return {"statusCode": 404, "body": "not found"}
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type":"application/json"},
+        "body": json.dumps(row)
+    }
+        </code></pre>
+
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# Dockerfile (enterprise-lambda)
+FROM public.ecr.aws/lambda/python:3.11
+# نصب وابستگی‌ها (بدون کش برای سبک‌تر بودن)
+RUN pip install --no-cache-dir pymysql boto3
+# کد اپ را کپی کن
+COPY app/ ${LAMBDA_TASK_ROOT}/
+# Handler: نام فایل و تابع
+CMD ["lambda_function.lambda_handler"]
+        </code></pre>
+        <p class="muted">دایرکتوری پیشنهادی ریپو: <code>enterprise-lambda/Dockerfile</code> و <code>enterprise-lambda/app/lambda_function.py</code></p>
+      </details>
+
+      <details>
+        <summary>Build و Push (خلاصهٔ مراحل)</summary>
+        <ol>
+          <li>در ماشین توسعه: Login به ECR (از کنسول دستور آماده بدهد)، سپس:</li>
+        </ol>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+# فرض: در پوشه enterprise-lambda هستی
+ACCOUNT_ID=<حساب شما>
+REGION=us-east-1
+REPO=enterprise-lambda
+ECR_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO
+
+# ورود به ECR (از کنسول هم می‌توانی دستور Login را کپی کنی)
+aws ecr get-login-password --region $REGION \
+ | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+
+# ساخت ایمیج و Push
+docker build -t $ECR_URI:latest .
+docker push $ECR_URI:latest
+        </code></pre>
+        <p class="muted">اگر CI/CD داری، می‌تونی همین را در CodeBuild/CodePipeline اتومات کنی.</p>
+      </details>
+    </div>
+
+    <div id="lambda" class="card">
+      <h2>۳) ایجاد Lambda از کانتینر + اتصال به VPC</h2>
+      <details open>
+        <summary>ایجاد تابع Lambda</summary>
+        <ol>
+          <li>Lambda → <b>Create function</b> → <b>Container image</b></li>
+          <li>Name: <code>enterprise-get-value</code></li>
+          <li>Image URI: آدرس <code>ECR_URI:latest</code> که بالا Push کردی</li>
+          <li>ایجاد Role اجرا (Execution role) با دسترسی‌ها:
+            <ul>
+              <li><b>logs:CreateLogGroup/Stream, PutLogEvents</b> (CloudWatch Logs)</li>
+              <li><b>secretsmanager:GetSecretValue</b> روی سکرت <code>enterprise-db-credentials</code></li>
+            </ul>
+          </li>
+          <li>Create function ✅</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>تنظیمات محیطی و VPC</summary>
+        <ol>
+          <li>Configuration → <b>Environment variables</b>:
+            <ul>
+              <li><code>SECRET_NAME=enterprise-db-credentials</code></li>
+              <li><code>AWS_REGION=us-east-1</code></li>
+            </ul>
+          </li>
+          <li>Configuration → <b>VPC</b>:
+            <ul>
+              <li>VPC: همان Default VPC (یا VPC دیتابیس)</li>
+              <li>Subnets: دو سابنت (ترجیحاً خصوصی)</li>
+              <li>Security group: SG مخصوص Lambda (Outbound باز)؛ در SG دیتابیس (Aurora) <b>اجازه Inbound از SG Lambda روی 3306</b> بده.</li>
+            </ul>
+          </li>
+        </ol>
+        <p class="muted">اگر Subnet خصوصی‌ست، اطمینان از دسترسی خروجی به Secrets Manager لازمه (NAT Gateway یا VPC Endpoint برای <i>com.amazonaws.us-east-1.secretsmanager</i>).</p>
+      </details>
+    </div>
+
+    <div id="apigw" class="card">
+      <h2>۴) API Gateway (HTTP API)</h2>
+      <details open>
+        <summary>ایجاد API و اتصال Route</summary>
+        <ol>
+          <li>API Gateway → <b>Create API</b> → نوع: <b>HTTP API</b></li>
+          <li>Routes:
+            <ul>
+              <li>Method: <b>GET</b> | Path: <code>/get_value</code></li>
+              <li>Integration: <b>Lambda</b> → تابع <code>enterprise-get-value</code></li>
+            </ul>
+          </li>
+          <li>Stages: پیش‌فرض <code>$default</code> (Auto-deploy روشن باشد) → URL الگو:
+            <br/><code>https://&lt;api-id&gt;.execute-api.us-east-1.amazonaws.com/get_value?id=01</code></li>
+        </ol>
+        <p class="muted">برای امنیت بیشتر می‌توانی JWT authorizer یا WAF جلو API بگذاری (بخش «بهبودها» پایین).</p>
+      </details>
+    </div>
+
+    <div id="test" class="card">
+      <h2>۵) تست و دیباگ</h2>
+      <ol>
+        <li>داخل Aurora جدول <code>enterprise_data</code> را پر کن (id, val1..val10).</li>
+        <li>با مرورگر/پست‌من بزن:
+          <br/><code>GET https://&lt;api-id&gt;.execute-api.us-east-1.amazonaws.com/get_value?id=&lt;your-id&gt;</code></li>
+        <li>اگر 5xx گرفتی:
+          <ul>
+            <li>CloudWatch Logs → لاگ تابع <code>enterprise-get-value</code></li>
+            <li>Role: دسترسی SecretsManager</li>
+            <li>VPC: SG و Route خروجی به Secrets (NAT یا Endpoint)</li>
+            <li>Aurora: SG Inbound از SG Lambda روی 3306</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <div id="bonus" class="card">
+      <h2>۶) بهبودها (امتیازی/پایداری)</h2>
+      <ul>
+        <li><b>RDS Proxy</b> برای مدیریت Connectionها (Lambda → Proxy → Aurora) → Latency کمتر و اتصال پایدارتر.</li>
+        <li><b>Throttling</b> روی API Gateway (Rate/ Burst) برای جلوگیری از حمله.</li>
+        <li><b>WAF</b> روی API (اگر با ALB هم‌مسیر می‌کنی، WAF روی ALB) با Managed Rules (SQLi/XSS/IP reputation).</li>
+        <li><b>Observability</b>:
+          <ul>
+            <li>Metrics: <i>Lambda Duration/Errors/Throttles</i>، <i>API GW 5xx/Latency</i></li>
+            <li>آلارم‌ها: خطای 5xx API، ارور Lambda، اتصال DB</li>
+          </ul>
+        </li>
+      </ul>
+      <p class="muted">Blood Pressure Web همچنان باید طبق توصیهٔ صورت‌مسئله روی ECS Fargate با باینری <code>stub1.zip</code> اجرا شود.</p>
+    </div>
+
+    <p class="muted">تمام ✅ — با این صفحه، Enterprise را به‌صورت Lambda + API GW بالا می‌آوری. اگر خواستی، نسخهٔ CI/CD (CodePipeline) برای ساخت و Push ایمیج <code>enterprise-lambda</code> را هم جداگانه می‌نویسم.</p>
+  </div>
+
+  <script>
+    function copyBlock(btn){
+      const pre = btn.parentElement;
+      const code = pre.querySelector('code');
+      const text = code.innerText;
+      navigator.clipboard.writeText(text).then(()=>{
+        const old = btn.innerText;
+        btn.innerText = "Copied!";
+        setTimeout(()=>btn.innerText=old,1200);
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>WSC2024 TP53 - Day2 - Stage 0 & Stage 1 (راهنمای کنسول)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee; --border:#1f2937; }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1100px;margin:32px auto;padding:16px}
+    h1{font-size:28px;margin:0 0 16px}
+    h2{font-size:22px;margin:24px 0 12px}
+    h3{font-size:18px;margin:16px 0 10px}
+    p,li{line-height:1.8}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin:14px 0}
+    .muted{color:var(--muted);font-size:13px}
+    .badge{display:inline-block;background:#0ea5e9; color:#00131a;padding:2px 8px;border-radius:999px;font-weight:700;font-size:12px}
+    .toc a{color:var(--accent);text-decoration:none}
+    .toc ul{margin:8px 0 0 0;padding:0 18px}
+    details{background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:10px 0}
+    details summary{cursor:pointer;font-weight:700}
+    code, pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px}
+    pre{background:#0b1320;border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto;position:relative;margin:10px 0}
+    .copy-btn{position:absolute;top:8px;left:8px;padding:6px 10px;border:1px solid var(--border);background:#0e1725;color:var(--text);border-radius:8px;cursor:pointer;font-size:12px}
+    .list-check li{margin-bottom:6px}
+    .kbd{border:1px solid var(--border);border-bottom-width:2px;padding:0 6px;border-radius:6px;background:#0e1725}
+    .two-col{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:860px){.two-col{grid-template-columns:1fr 1fr}}
+    .note{border-right:4px solid #22d3ee;padding-right:10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>WSC2024 TP53 — Day 2 — Stage 0 & Stage 1 (راهنمای کامل کنسول)</h1>
+    <p class="muted">Region: <b>us-east-1</b> | ممنوع: EKS | توصیه‌شده: ECS/CodePipeline (برای Stage 2) | مدیریت دسترسی روی SSM</p>
+
+    <div class="card toc">
+      <h3>فهرست</h3>
+      <ul>
+        <li><a href="#stage0">مرحله ۰ — آماده‌سازی پایه (پیش‌نیازها)</a></li>
+        <li><a href="#stage1">Stage 1 — Data Reception</a></li>
+        <li><a href="#bp-sql">کدهای لازم (SQL & KDA)</a></li>
+        <li><a href="#tips">نکات امتیازی و بهینه‌سازی</a></li>
+      </ul>
+    </div>
+
+    <div id="stage0" class="card">
+      <h2>مرحله ۰ — آماده‌سازی پایه (پیش‌نیازها) <span class="badge">Required</span></h2>
+
+      <details open>
+        <summary>۱) بودجه و تگ‌گذاری</summary>
+        <ol class="list-check">
+          <li>برو <b>AWS Budgets</b> → <b>Create budget</b> → نوع <b>Cost budget</b> → مقدار مثلاً <b>10$</b> → هشدار ایمیل خودت.</li>
+          <li>یک تگ مشترک برای همه منابع: <code>Project=TP53-Day2</code> (در هنگام ساخت هر سرویس ست کن).</li>
+        </ol>
+      </details>
+
+      <details>
+        <summary>۲) S3 Bucket برای آرتیفکت‌ها / لاگ‌ها</summary>
+        <ol class="list-check">
+          <li>S3 → <b>Create bucket</b> → نام مثل: <code>tp53-day2-artifacts-yourname</code> (Region: us-east-1)</li>
+          <li><b>Block all public access = ON</b>، <b>Versioning = Enable</b>.</li>
+        </ol>
+      </details>
+
+      <details>
+        <summary>۳) IAM Role برای Kinesis Data Analytics</summary>
+        <ol class="list-check">
+          <li>IAM → Roles → <b>Create role</b> → Use case: <b>Kinesis Analytics</b>.</li>
+          <li>Policies (حداقل): <code>AmazonKinesisFullAccess</code>، <code>AmazonDynamoDBFullAccess</code>، <code>CloudWatchLogsFullAccess</code>.</li>
+          <li>نام: <code>kda-bp-role</code> → Create.</li>
+        </ol>
+      </details>
+
+      <details>
+        <summary>۴) بررسی/ایجاد Default VPC</summary>
+        <ol>
+          <li>VPC → Your VPCs → اگر Default نیست: از <b>Actions → Create default VPC</b> بساز.</li>
+        </ol>
+      </details>
+
+      <details>
+        <summary>۵) Security Group‌ برای دیتابیس‌ها</summary>
+        <div class="two-col">
+          <div class="note">
+            <h4>Aurora</h4>
+            <ul>
+              <li>نام: <code>sg-aurora-public</code></li>
+              <li>Inbound: MySQL/Aurora (3306) → <b>My IP</b></li>
+            </ul>
+          </div>
+          <div class="note">
+            <h4>Redshift</h4>
+            <ul>
+              <li>نام: <code>sg-redshift-public</code></li>
+              <li>Inbound: Redshift (5439) → <b>My IP</b></li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details>
+        <summary>۶) DynamoDB Table (نتایج آنی فشار خون)</summary>
+        <ol>
+          <li>DynamoDB → Tables → <b>Create table</b></li>
+          <li>Table name: <code>cloudraiser-iot</code> | Partition key: <code>No</code> (String)</li>
+          <li>بعد از ساخت: تب <b>Additional settings → TTL</b> → Enable → Attribute name: <code>expireAt</code></li>
+        </ol>
+      </details>
+
+      <details>
+        <summary>۷) CloudWatch Logs (برای KDA)</summary>
+        <ol>
+          <li>CloudWatch → Logs → Log groups → <b>Create log group</b> → نام: <code>/kinesis/blood-pressure-analytics</code></li>
+        </ol>
+      </details>
+    </div>
+
+    <div id="stage1" class="card">
+      <h2>Stage 1 — Data Reception</h2>
+
+      <details open>
+        <summary>الف) Blood Pressure Data — Kinesis Stream</summary>
+        <ol>
+          <li>Kinesis → Data streams → <b>Create data stream</b></li>
+          <li>Name: <code>blood-pressure-stream</code> | Shards: <code>1</code> → Create → وضعیت: <b>ACTIVE</b>.</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>ب) Kinesis Data Analytics (SQL + Random Cut Forest)</summary>
+        <ol>
+          <li>Kinesis Data Analytics → <b>Create application</b> → Name: <code>blood-pressure-analytics</code> → Runtime: <b>SQL</b> → Create.</li>
+          <li>Source: نوع <b>Kinesis data stream</b> → Stream: <code>blood-pressure-stream</code></li>
+          <li>Schema (مثال ساده): <code>no STRING, systolic DOUBLE, diastolic DOUBLE</code></li>
+          <li>SQL editor: اسکریپت RCF را از بخش <a href="#bp-sql">«کدهای لازم»</a> وارد کن.</li>
+          <li>Destination: <b>DynamoDB</b> → Table: <code>cloudraiser-iot</code> → Role: <code>kda-bp-role</code></li>
+          <li><b>Run application</b> (لاگ‌ها در: <code>/kinesis/blood-pressure-analytics</code>).</li>
+        </ol>
+      </details>
+
+      <details open>
+        <summary>ج) Redshift (تحلیل تاریخی)</summary>
+        <ol>
+          <li>Redshift → Clusters → <b>Create cluster</b></li>
+          <li>Identifier: <code>blood-pressure-redshift</code> | Node type: <code>dc2.large</code> | Nodes: <code>1</code></li>
+          <li>DB name: <code>analytics</code> | Publicly accessible: <b>Yes</b> | SG: <code>sg-redshift-public</code></li>
+          <li>ایجاد Cluster → منتظر بمان تا <b>Available</b> شود.</li>
+        </ol>
+        <p class="muted">یادآوری: استفاده از Serverless برای Redshift در مسابقه ممنوع است.</p>
+      </details>
+
+      <details open>
+        <summary>د) Aurora (Enterprise Operation Data)</summary>
+        <ol>
+          <li>RDS → <b>Create database</b> → Engine: <b>Amazon Aurora</b> (MySQL-compatible) → Template: <b>Free tier</b>.</li>
+          <li>DB cluster id: <code>enterprise-cluster</code> | Master: <code>admin</code> | Password: امن</li>
+          <li>Public access: <b>Yes</b> | SG: <code>sg-aurora-public</code> | Create.</li>
+          <li>پس از Available شدن، Query editor را باز کن و جدول را بساز (پایین 👇).</li>
+        </ol>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+CREATE TABLE enterprise_data (
+  id VARCHAR(20) PRIMARY KEY,
+  val1 VARCHAR(100),
+  val2 VARCHAR(100),
+  val3 VARCHAR(100),
+  val4 VARCHAR(100),
+  val5 VARCHAR(100),
+  val6 VARCHAR(100),
+  val7 VARCHAR(100),
+  val8 VARCHAR(100),
+  val9 VARCHAR(100),
+  val10 VARCHAR(100)
+);
+        </code></pre>
+      </details>
+    </div>
+
+    <div id="bp-sql" class="card">
+      <h2>کدهای لازم (SQL & KDA)</h2>
+
+      <details open>
+        <summary>۱) تعریف استریم مقصد و پمپ RCF در KDA (نمونه ساده)</summary>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+-- خروجی آنالیز به یک استریم مقصد
+CREATE OR REPLACE STREAM "DESTINATION_SQL_STREAM" (
+  no VARCHAR(32),
+  systolic DOUBLE,
+  diastolic DOUBLE,
+  anomalyScore DOUBLE,
+  expireAt BIGINT
+);
+
+-- پمپ: اجرای RCF روی ورودی
+CREATE OR REPLACE PUMP "STREAM_PUMP" AS INSERT INTO "DESTINATION_SQL_STREAM"
+SELECT STREAM
+  no,
+  systolic,
+  diastolic,
+  ANOMALY_SCORE AS anomalyScore,
+  -- TTL برای حذف خودکار پس از 48 ساعت (172800 ثانیه)
+  CAST((FLOOR(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) + 172800)) AS BIGINT) AS expireAt
+FROM TABLE(
+  RANDOM_CUT_FOREST(
+    CURSOR(SELECT STREAM systolic, diastolic FROM "SOURCE_SQL_STREAM_001"),
+    100, 256
+  )
+);
+        </code></pre>
+        <p class="muted">نکته: در Destination mapping برای DynamoDB، فیلدها را به ستون‌های جدول <code>cloudraiser-iot</code> مپ کن (No/Systolic/Diastolic/Score). اگر نام‌ها متفاوت است، از یک SQL میانی برای Rename استفاده کن.</p>
+      </details>
+
+      <details>
+        <summary>۲) ساختار جدول DynamoDB موردنیاز مسابقه</summary>
+        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button><code>
+Table: cloudraiser-iot
+Partition key: No (String)
+Attributes:
+- No (String)          -- کلید پارتیشن
+- Systolic (String)
+- Diastolic (String)
+- Score (String)       -- یا anomalyScore به عنوان Score
+- expireAt (Number)    -- برای TTL (Epoch seconds)
+        </code></pre>
+      </details>
+    </div>
+
+    <div id="tips" class="card">
+      <h2>نکات امتیازی، پایش و هزینه</h2>
+      <ul>
+        <li><b>CloudWatch Alarms:</b> برای Kinesis (IteratorAgeHigh)، DynamoDB (ThrottledRequests)، Redshift (CPU/Queue).</li>
+        <li><b>TTL</b> روی DynamoDB حتماً روشن باشد (حذف داده‌های &gt; ۴۸ ساعت).</li>
+        <li><b>تگ‌گذاری</b>: روی همه منابع <code>Project=TP53-Day2</code> برای مدیریت هزینه.</li>
+        <li><b>امنیت تستی</b>: SGها را فقط از <b>My IP</b> باز کن؛ بعداً می‌شود خصوصی‌سازی کرد (VPC Endpoints/KMS).</li>
+        <li><b>Serverless Redshift ممنوع</b> (طبق مستند مسابقه).</li>
+        <li>Stage 2 را با <b>ECS + CodePipeline</b> پیش ببر (باینری مسابقه روی ECS Fargate).</li>
+      </ul>
+    </div>
+
+    <p class="muted">ادامه: اگر خواستی، نسخه‌ی HTML برای Stage 2 (ECS + APIها + لاگ/مانیتورینگ) هم برات آماده می‌کنم.</p>
+  </div>
+
+  <script>
+    function copyBlock(btn){
+      const pre = btn.parentElement;
+      const code = pre.querySelector('code');
+      const text = code.innerText;
+      navigator.clipboard.writeText(text).then(()=>{
+        const old = btn.innerText;
+        btn.innerText = "Copied!";
+        setTimeout(()=>btn.innerText=old,1200);
+      });
+    }
+  </script>
+</body>
+</html>
