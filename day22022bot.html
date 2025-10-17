@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WSC Day2 – Unicorn Service on AWS EKS (کنسول AWS | گام‌به‌گام)</title>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto;line-height:1.7;background:#0b1020;color:#e6e9f5;margin:0}
+    header{position:sticky;top:0;background:#0f1530cc;backdrop-filter:blur(6px);border-bottom:1px solid #1e2a5a;padding:12px 16px;z-index:10}
+    h1{margin:0;font-size:20px}
+    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+    details{border:1px solid #22306b;border-radius:14px;margin:12px 0;background:#0f1736}
+    summary{cursor:pointer;user-select:none;padding:14px 18px;font-weight:700}
+    .box{padding:0 18px 18px}
+    code,kbd,pre{background:#0b1330;border:1px solid #1d2b6c;border-radius:10px}
+    code{padding:2px 6px}
+    pre{padding:14px;overflow:auto}
+    kbd{padding:2px 6px;border-bottom-width:2px}
+    .tip{border-right:4px solid #4fd1c5;background:#072a2b;border-radius:12px;padding:10px 12px;margin:10px 0}
+    .warn{border-right:4px solid #f59e0b;background:#2a1e05;border-radius:12px;padding:10px 12px;margin:10px 0}
+    .danger{border-right:4px solid #ef4444;background:#2a0e10;border-radius:12px;padding:10px 12px;margin:10px 0}
+    .grid{display:grid;gap:10px}
+    .two{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .three{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .muted{opacity:.85}
+    .small{font-size:13px}
+    .pill{display:inline-block;border:1px solid #33407d;background:#0b1538;border-radius:999px;padding:3px 10px;margin:2px 0}
+    .hr{height:1px;background:linear-gradient(90deg,#12215a,#1d2b6c,#12215a);margin:22px 0}
+    a{color:#9cc0ff}
+    .kbd{font-family:monospace}
+    .btns{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+    .btn{border:1px solid #33407d;border-radius:12px;background:#0b1538;padding:8px 10px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #22306b;padding:8px}
+    th{background:#101a3a}
+    .hide{filter:blur(6px)}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WSC Day2 – Unicorn Service on AWS EKS (راهنمای کنسول | گام‌به‌گام)</h1>
+    <div class="small muted">⌨️ میانبر: <kbd>Shift</kbd> + <kbd>S</kbd> برای نمایش/مخفی کردن محتوا</div>
+  </header>
+
+  <div class="wrap">
+
+    <details open>
+      <summary>۰) مقدمه و نام‌گذاری استاندارد</summary>
+      <div class="box">
+        <p>این داکیومنت مخصوص پیاده‌سازی سناریوی <strong>Unicorn Service</strong> روی <strong>Amazon EKS</strong> با استفاده از <strong>کنسول AWS</strong> است. همه مراحل، مو به مو و با مسیر منوها نوشته شده تا بدون CLI هم پیش بروی.</p>
+        <div class="grid two">
+          <div>
+            <h3>پیش‌فرض‌های نام‌گذاری</h3>
+            <ul>
+              <li>Region: <code>us-east-1</code></li>
+              <li>VPC: <code>wsc-eks-vpc</code></li>
+              <li>Subnets: <code>wsc-public-a/b</code> و <code>wsc-private-a/b</code></li>
+              <li>Security Groups: <code>wsc-eks-nodes-sg</code>، <code>wsc-rds-sg</code>، <code>wsc-redis-sg</code>، <code>wsc-efs-sg</code></li>
+              <li>EKS Cluster: <code>wsc-eks</code> | Node Group: <code>wsc-ng</code></li>
+              <li>RDS MySQL: <code>wsc-mysql</code> | DB: <code>unicorndb</code> | Table: <code>unicorns</code></li>
+              <li>ElastiCache: <code>wsc-redis</code> (Standalone)</li>
+              <li>EFS: <code>wsc-efs</code></li>
+              <li>S3 Bucket: <code>wsc-unicorn-refunds-<em>yourid</em></code></li>
+              <li>AppConfig Application: <code>unicorn-app</code> | Env: <code>prod</code></li>
+            </ul>
+          </div>
+          <div>
+            <h3>نکات کلیدی مسابقه</h3>
+            <ul>
+              <li>ترافیک <strong>۲ ساعت</strong> بعد از شروع می‌آید؛ پس تا قبلش سرویس باید روی EKS بالا باشد.</li>
+              <li>EC2 ابتدایی را <strong>حذف نکن</strong> (bastion). برای دسترسی از <strong>Session Manager</strong> استفاده کن.</li>
+              <li>رمزهای دیتابیس باید با <strong>Secrets Manager Rotation (30 روزه)</strong> بچرخند.</li>
+              <li>Redis باید <strong>Cluster نشود</strong>؛ از <strong>Standalone</strong> استفاده کن.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="warn small">اگر چیزی را نداری (Role/Policy/…)، از همان کنسول بساز؛ نام‌ها را دقیق یادداشت کن تا در مراحل بعدی استفاده شوند.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱) ساخت شبکه: VPC، Subnet، Route، NAT/IGW</summary>
+      <div class="box">
+        <ol>
+          <li>به <strong>VPC → Your VPCs → Create VPC</strong> برو.
+            <ul>
+              <li>VPC only → Name: <code>wsc-eks-vpc</code>, IPv4 CIDR: <code>10.0.0.0/16</code></li>
+            </ul>
+          </li>
+          <li>در <strong>Subnets</strong>، چهار Subnet بساز:
+            <ul>
+              <li>Public A: <code>10.0.0.0/20</code> (az1)</li>
+              <li>Public B: <code>10.0.16.0/20</code> (az2)</li>
+              <li>Private A: <code>10.0.32.0/20</code> (az1)</li>
+              <li>Private B: <code>10.0.48.0/20</code> (az2)</li>
+            </ul>
+          </li>
+          <li>در <strong>Internet Gateway</strong> یک IGW بساز و به VPC وصل کن.</li>
+          <li>در <strong>NAT Gateways</strong> یک NAT در یکی از Public Subnetها بساز (Elastic IP لازم دارد).</li>
+          <li>Route Tableها:
+            <ul>
+              <li>Public RT → Route: <code>0.0.0.0/0 → igw</code>، Associate با هر دو Public Subnet</li>
+              <li>Private RT → Route: <code>0.0.0.0/0 → nat-gw</code>، Associate با هر دو Private Subnet</li>
+            </ul>
+          </li>
+        </ol>
+        <div class="tip small">EKS Nodeها را در <strong>Private Subnet</strong> بساز تا ایمن‌تر باشد؛ ALB در Public Subnet می‌نشیند.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۲) Security Groups (تفکیک‌شده برای هر سرویس)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>wsc-eks-nodes-sg</strong>: ورودی از خودی‌ها و ALB.
+            <ul>
+              <li>Inbound: TCP 10250 از <em>خودی‌ها</em>، TCP 443/80 از <em>ALB SG</em> (بعداً می‌سازیم)</li>
+              <li>Outbound: All traffic (پیش‌فرض)</li>
+            </ul>
+          </li>
+          <li><strong>wsc-rds-sg</strong>:
+            <ul>
+              <li>Inbound: MySQL (3306) از <code>wsc-eks-nodes-sg</code></li>
+              <li>Outbound: All</li>
+            </ul>
+          </li>
+          <li><strong>wsc-redis-sg</strong>:
+            <ul>
+              <li>Inbound: Redis (6379) از <code>wsc-eks-nodes-sg</code></li>
+              <li>Outbound: All</li>
+            </ul>
+          </li>
+          <li><strong>wsc-efs-sg</strong>:
+            <ul>
+              <li>Inbound: NFS (2049) از <code>wsc-eks-nodes-sg</code></li>
+              <li>Outbound: All</li>
+            </ul>
+          </li>
+        </ol>
+        <div class="warn small">در هر سرویس مقصد، Source را دقیقاً <strong>SG نودهای EKS</strong> قرار بده، نه CIDR.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۳) Secrets Manager (ساخت Secret دیتابیس + Rotation 30 روز)</summary>
+      <div class="box">
+        <ol>
+          <li>به <strong>Secrets Manager → Store a new secret</strong> برو.
+            <ul>
+              <li>نوع: <strong>Credentials for RDS database</strong></li>
+              <li>username/password دیتابیس را وارد کن.</li>
+              <li>Secret name: <code>rds/mysql/unicorn</code></li>
+            </ul>
+          </li>
+          <li>در مرحله بعد، <strong>Enable automatic rotation</strong> را فعال کن، دوره: <strong>30 days</strong>.
+            <div class="small muted">در صورت نیاز، از الگوی <em>RDS Single-User rotation</em> استفاده کن.</div>
+          </li>
+        </ol>
+        <div class="tip small">ARN این Secret را برای <strong>AppConfig JSON</strong> لازم داریم.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۴) RDS MySQL (ساخت DB: unicorndb و جدول unicorns)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>RDS → Databases → Create database</strong>
+            <ul>
+              <li>Engine: MySQL (t3.medium)، Multi-AZ (در صورت اجازه)،
+                Storage کم‌هزینه.</li>
+              <li>Connectivity: در همان VPC؛ <strong>Security Group = wsc-rds-sg</strong></li>
+              <li>Public access: <strong>No</strong></li>
+              <li>DB name: <code>unicorndb</code></li>
+              <li>Secrets Manager را برای Credential انتخاب کن (از مرحله قبل).</li>
+            </ul>
+          </li>
+          <li>بعد از Available شدن DB، از طریق <strong>Session Manager</strong> روی Bastion یا از داخل یکی از Nodeها وصل شو و جدول را بساز:
+            <pre><code>CREATE TABLE unicorns (
+  unicornid varchar(256),
+  unicornlocation varchar(256)
+);
+</code></pre>
+          </li>
+        </ol>
+        <div class="warn small">نام جدول باید دقیقاً <strong>unicorns</strong> باشد.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۵) ElastiCache (Redis Standalone)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>ElastiCache → Redis → Create</strong>
+            <ul>
+              <li>Deployment type: Cluster mode disabled (Standalone)</li>
+              <li>Node type: <code>cache.t3.medium</code></li>
+              <li>Number of replicas: 0 یا 1 (HA سبک)</li>
+              <li>VPC/Subnet group: همان VPC خصوصی</li>
+              <li>Security group: <strong>wsc-redis-sg</strong></li>
+            </ul>
+          </li>
+          <li>Endpoint & Port را یادداشت کن (پیش‌فرض 6379).</li>
+        </ol>
+        <div class="warn small">Redis Cluster پشتیبانی نمی‌شود؛ حتماً Cluster Mode Disabled بزن.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۶) EFS (ذخیره Cache فایل‌ها)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>EFS → Create file system</strong>
+            <ul>
+              <li>VPC: <code>wsc-eks-vpc</code></li>
+              <li>Mount targets: در هر AZ خصوصی</li>
+              <li>Security group: <strong>wsc-efs-sg</strong></li>
+            </ul>
+          </li>
+          <li>بعداً از <code>efs-csi</code> در EKS برای Mount استفاده می‌کنیم یا می‌توانی <code>FsPath</code> را محلی بگذاری.</li>
+        </ol>
+      </div>
+    </details>
+
+    <details>
+      <summary>۷) S3 Bucket (برای Refund Logs)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>S3 → Create bucket</strong>
+            <ul>
+              <li>Name: <code>wsc-unicorn-refunds-&lt;yourid&gt;</code></li>
+              <li>Block public access: On</li>
+              <li>Bucket versioning: اختیاری</li>
+            </ul>
+          </li>
+        </ol>
+      </div>
+    </details>
+
+    <details>
+      <summary>۸) AWS AppConfig (Application/Environment/Configuration)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>AppConfig → Create application</strong> → Name: <code>unicorn-app</code></li>
+          <li><strong>Environments → Create</strong> → Name: <code>prod</code></li>
+          <li><strong>Configuration profiles → Create</strong>
+            <ul>
+              <li>Profile name: <code>unicorn-config</code></li>
+              <li>Configuration source: Hosted</li>
+            </ul>
+          </li>
+          <li><strong>Start deployment</strong> → JSON کانفیگ را وارد کن (Stub یا Root):
+            <pre><code>{
+  "DBSecretArn": "arn:aws:secretsmanager:us-east-1:111122223333:secret:rds/mysql/unicorn",
+  "DBName": "unicorn",
+  "FsPath": "/mnt/cache/",
+  "Bucket": "wsc-unicorn-refunds-&lt;yourid&gt;",
+  "Port": 80
+}
+</code></pre>
+            <pre><code>{
+  "RedisHost": "&lt;redis-primary-endpoint&gt;",
+  "RedisPort": "6379",
+  "FsPath": "/mnt/cache/",
+  "Port": 80,
+  "Bucket": "wsc-unicorn-refunds-&lt;yourid&gt;"
+}
+</code></pre>
+          </li>
+        </ol>
+        <div class="tip small">بعداً App از طریق SDK/agent این Config را می‌خواند. مقدارها را دقیق از مراحل قبل جایگزین کن.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۹) EKS Cluster و Node Group (با Roleهای از پیش‌ساخته)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>EKS → Clusters → Create</strong>
+            <ul>
+              <li>Cluster name: <code>wsc-eks</code></li>
+              <li>Cluster Service Role: <code>EKSClusterRole</code> (ارائه‌شده)</li>
+              <li>Kubernetes version: آخرین نسخه مجاز مسابقه</li>
+              <li>VPC/Subnets: همان Private Subnetها</li>
+              <li>Security group: یک SG پیش‌فرض EKS یا SG مخصوص بساز</li>
+              <li>Logging: حداقل control plane logs را فعال کن</li>
+            </ul>
+          </li>
+          <li>پس از ایجاد، از تب <strong>Compute → Add node group</strong>
+            <ul>
+              <li>Name: <code>wsc-ng</code></li>
+              <li>Node IAM role: <code>EKSNodeRole</code> (ارائه‌شده)</li>
+              <li>Instance type: <code>t3.medium</code> (دو نود)</li>
+              <li>Subnets: Private</li>
+              <li>Remote access: غیرفعال (SSH از اینترنت ممنوع)</li>
+            </ul>
+          </li>
+        </ol>
+        <div class="warn small">برای دسترسی به نودها، از <strong>SSM Agent + Session Manager</strong> استفاده کن (روی AMI EKS optimized موجود است/نصب کن).</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۰) نصب AWS Load Balancer Controller (Add-on رسمی از کنسول)</summary>
+      <div class="box">
+        <ol>
+          <li>در صفحه کلاستر: <strong>Add-ons → Get more add-ons</strong> → <strong>AWS Load Balancer Controller</strong> را انتخاب و نصب کن.</li>
+          <li>در صورت نیاز به IAM نقش سرویس (IRSA)، ویزارد Add-on خودش Role را می‌سازد یا Role موجود را انتخاب کن.</li>
+          <li>پس از نصب، وضعیت Add-on باید <strong>Active</strong> شود.</li>
+        </ol>
+        <div class="tip small">این کنترلر، <strong>Ingress</strong>های نوع ALB را می‌سازد تا ترافیک اینترنتی به سرویس‌ها برسد.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۱) ساخت ECR و ایمیج اپ (در صورت نیاز)</summary>
+      <div class="box">
+        <ol>
+          <li><strong>ECR → Create repository</strong> → Name: <code>unicorn</code></li>
+          <li>ایمیج اپلیکیشن Go (باینری مسابقه) را بسته‌بندی و Push کن.
+            <div class="small muted">اگر ایمیج آماده مسابقه دارید، همین حالا Pull/Tag/Push کنید.</div>
+          </li>
+        </ol>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۲) دیپلوی Workload در کنسول EKS (Deployment/Service/Ingress)</summary>
+      <div class="box">
+        <ol>
+          <li>به <strong>EKS → Clusters → wsc-eks → Workloads → Deploy</strong> برو و از ویرایشگر YAML استفاده کن.</li>
+          <li>YAML نمونه (FsPath محلی؛ اگر EFS می‌خواهی، از PV/PVC + efs-csi استفاده کن):
+            <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unicorn
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: unicorn }
+  template:
+    metadata:
+      labels: { app: unicorn }
+    spec:
+      containers:
+      - name: unicorn
+        image: &lt;ACCOUNT_ID&gt;.dkr.ecr.us-east-1.amazonaws.com/unicorn:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: APPCONFIG_APP
+          value: "unicorn-app"
+        - name: APPCONFIG_ENV
+          value: "prod"
+        - name: APPCONFIG_PROFILE
+          value: "unicorn-config"
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: FSPATH
+          value: "/mnt/cache/"
+        volumeMounts:
+        - name: cache
+          mountPath: /mnt/cache
+      volumes:
+      - name: cache
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unicorn-svc
+spec:
+  selector: { app: unicorn }
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: unicorn-ing
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: unicorn-svc
+            port:
+              number: 80
+</code></pre>
+          </li>
+          <li>پس از Deploy، به تب <strong>Ingresses</strong> برو؛ وقتی ALB ساخته شد، <strong>DNS</strong> آن را برای Scoreboard ثبت کن.</li>
+        </ol>
+        <div class="tip small">Root path <code>/</code> باید 200 برگرداند (Health).</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۳) اتصال به RDS و Redis + استفاده از Secret و AppConfig</summary>
+      <div class="box">
+        <p>با توجه به نحوه پیاده‌سازی باینری، اتصال‌ها با خواندن Config از AppConfig و Secret انجام می‌شود. مطمئن شو:</p>
+        <ul>
+          <li>SGهای مقصد (RDS/Redis/EFS) به SG نودهای EKS اجازه داده‌اند.</li>
+          <li>نقش سرویس پاد (IRSA) یا نقش نودها اجازه <code>appconfig:GetConfiguration*</code> و <code>secretsmanager:GetSecretValue</code> دارد.</li>
+        </ul>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۴) مانیتورینگ و مقیاس‌پذیری (HPA و Cluster Autoscaler)</summary>
+      <div class="box">
+        <ol>
+          <li>در <strong>CloudWatch → Metrics</strong>، لاگ‌ها و متریک‌ها را برای پادها/نودها بررسی کن.</li>
+          <li><strong>HorizontalPodAutoscaler</strong> از طریق Workloads → Deploy (YAML):
+            <pre><code>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: unicorn-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: unicorn
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+</code></pre>
+          </li>
+          <li>در صورت نیاز به افزایش نودها، <strong>Node group → Scaling</strong> را افزایش بده یا Cluster Autoscaler را با YAML دیپلوی کن.</li>
+        </ol>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۵) رسیدگی به Refund Events (S3 + POST به Audit)</summary>
+      <div class="box">
+        <p>هر از گاهی یک <code>UUID</code> می‌رسد که باید به سیستم Audit ارسالش کنی. ساده‌ترین راه: اجرای <code>curl</code> از Bastion با Session Manager:</p>
+        <ol>
+          <li><strong>EC2 → Instances → Bastion → Connect → Session Manager</strong></li>
+          <li>دستور نمونه:
+            <pre><code>curl -i -H "Accept: application/json" -X POST \
+  -d '{"game":"&lt;GAME_ID&gt;","team":"&lt;TEAM_ID&gt;","order":"&lt;REQUEST_UUID&gt;"}' \
+  https://stats.aws.dev-null.link/proc/refund
+</code></pre>
+          </li>
+          <li>یک اسکریپت کوچک بساز تا UUIDها را به S3 خودت هم Log کند.</li>
+        </ol>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۶) چک‌لیست ۹۰ دقیقه‌ای قبل از شروع ترافیک</summary>
+      <div class="box">
+        <ul>
+          <li>✅ EKS Cluster Active + دو نود آماده</li>
+          <li>✅ RDS/Redis/EFS ساخته، SGها درست</li>
+          <li>✅ AppConfig منتشر شده و App به آن دسترسی دارد</li>
+          <li>✅ ALB Ingress آدرس DNS دارد و در مرورگر باز می‌شود</li>
+          <li>✅ Health روی <code>/</code> برابر 200</li>
+          <li>✅ Secret Rotation فعال (30 روز)</li>
+          <li>✅ Session Manager کار می‌کند (SSH باز نیست)</li>
+          <li>✅ مانیتورینگ CloudWatch و HPA تنظیم</li>
+        </ul>
+      </div>
+    </details>
+
+    <details>
+      <summary>۱۷) رفع خطاهای رایج (Troubleshooting)</summary>
+      <div class="box">
+        <ul>
+          <li><strong>ALB ساخته نمی‌شود:</strong> Add-on نصب نیست یا Annotationها ناقص است.</li>
+          <li><strong>503 از اپ:</strong> Replica کم، اتصال به RDS/Redis برقرار نیست، یا FsPath خطاست.</li>
+          <li><strong>Connection refused به RDS/Redis:</strong> SG مقصد به SG نودها اجازه نداده.</li>
+          <li><strong>AppConfig خوانده نمی‌شود:</strong> IAM دسترسی <code>appconfig:GetConfiguration</code> ندارد.</li>
+          <li><strong>ندیدن لاگ‌ها:</strong> IAM برای CloudWatch Logs یا FluentBit/Container Insights را بررسی کن.</li>
+        </ul>
+      </div>
+    </details>
+
+    <div class="hr"></div>
+    <div class="small muted">© Cheat Sheet for WSC Day2 – آماده برای GitHub Pages شما. کل سند را می‌توانید کپی/پیست کنید.</div>
+
+  </div>
+
+  <script>
+    // Shift+S hide/show content
+    let hidden=false;
+    const toggle=()=>{
+      document.querySelectorAll('.wrap').forEach(el=>{
+        if(hidden){ el.classList.remove('hide'); }
+        else{ el.classList.add('hide'); }
+      });
+      hidden=!hidden;
+    };
+    window.addEventListener('keydown',e=>{
+      if(e.key.toLowerCase()==='s' && e.shiftKey){
+        e.preventDefault(); toggle();
+      }
+    });
+  </script>
+</body>
+</html>
