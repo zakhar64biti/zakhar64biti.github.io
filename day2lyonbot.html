@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>WSC Day2 – راهنمای کنسول (us-east-1)</title>
+  <style>
+    body{font-family: Vazirmatn,IRANSans,Segoe UI,Arial;max-width:1100px;margin:40px auto;line-height:1.7}
+    code,pre{background:#f7f7f7;border:1px solid #eee;border-radius:8px;padding:8px 10px;display:block;overflow:auto}
+    details{margin:14px 0;border:1px solid #eee;border-radius:12px;padding:10px 14px;background:#fff}
+    summary{cursor:pointer;font-weight:700}
+    .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:#eef}
+    .warn{background:#fff7e6;border-color:#ffd591}
+    .ok{background:#f6ffed;border-color:#b7eb8f}
+    .step{border-inline-start:4px solid #1677ff;padding-inline:12px;margin:10px 0}
+    .num{background:#1677ff;color:#fff;border-radius:6px;padding:2px 6px;margin-inline-end:6px}
+  </style>
+</head>
+<body>
+
+<h1>WSC 2024 – Day 2 (TP53) – راهنمای قدم‌به‌قدم کنسول – <span class="tag">Region: us-east-1</span></h1>
+
+<p class="step warn">
+  <b>الزامات/محدودیت‌ها:</b> داده فشار خون → Kinesis→Analytics→DynamoDB(+Redshift برای تاریخچه)، 
+  داده بیزینس → Aurora (غیر Serverless)، وب‌سرویس خروجی DynamoDB با باینری آماده (x86/AL2)،
+  API GET برای Aurora، <b>EKS ممنوع</b>، استفاده از <b>ECS توصیه‌شده</b>،
+  Itemهای DynamoDB قدیمی‌تر از ۴۸ ساعت حذف شوند. (منبع: سند مسابقه)
+</p>
+
+<!-- ===================== Stage 0: شبکه و پایه ===================== -->
+<details open>
+  <summary>Stage 0 – پیش‌نیازهای شبکه و حساب</summary>
+  <div>
+    <div class="step">
+      <span class="num">1</span><b>VPC پایه (اگر VPC آماده نداری):</b><br/>
+      VPC → Create VPC → <i>VPC and more</i> → نام: <code>wsc-day2</code>، IPv4: <code>10.0.0.0/16</code>، 
+      2 AZ (مثلاً a,b) با 4 Subnet (2 پابلیک، 2 پرایوت). NAT Gateway برای Subnetهای پرایوت بساز.
+    </div>
+    <div class="step">
+      <span class="num">2</span><b>VPC Endpoints (کاهش خروج به اینترنت):</b><br/>
+      برای <code>com.amazonaws.us-east-1.{dynamodb, kinesis-streams, logs, s3}</code> 
+      Endpoint ایجاد کن (Gateway برای S3/DynamoDB، Interface برای بقیه). 
+    </div>
+    <div class="step">
+      <span class="num">3</span><b>CloudWatch Log groups:</b> <code>/wsc/day2/kinesis-analytics</code>، <code>/wsc/day2/ecs/web</code>، <code>/wsc/day2/api</code>
+    </div>
+    <div class="step">
+      <span class="num">4</span><b>SSM (بدون SSH):</b> IAM Role مدیریتی با <code>AmazonSSMManagedInstanceCore</code> داشته باش تا بعداً اگر EC2/ECS-EC2 داشتی، با Session Manager وصل شی.
+    </div>
+  </div>
+</details>
+
+<!-- ===================== Stage 1: Reception ===================== -->
+<details open>
+  <summary>Stage 1 – Data Reception: Kinesis → KDA → DynamoDB (+Redshift)</summary>
+  <div>
+
+    <h3>1) DynamoDB (نتیجه Real-Time)</h3>
+    <div class="step">
+      <span class="num">1.1</span><b>ساخت جدول:</b> DynamoDB → Create table<br/>
+      Table name: <code>cloudraiser-iot</code><br/>
+      Partition key: <code>No</code> (String)<br/>
+      سایر Attributeها طبق خروجی Analytics در Item ذخیره می‌شوند: <code>Systolic, Diastolic, Score</code><br/>
+      Billing: <i>On-demand</i> برای سادگی. 
+      <br/>⚠️ از سند: نام جدول و فیلدها الزام دارند.
+    </div>
+    <div class="step">
+      <span class="num">1.2</span><b>TTL برای حذف آیتم‌های &gt; 48h:</b><br/>
+      یک Attribute زمان (epoch seconds) مثل <code>expireAt</code> در Itemها بنویس و در تب <i>Time to live</i>، 
+      TTL را روی <code>expireAt</code> فعال کن تا حذف خودکار شود.
+    </div>
+
+    <h3>2) Redshift (تحلیل تاریخی آنومالی‌ها)</h3>
+    <div class="step">
+      <span class="num">2.1</span><b>کلاستر Redshift غیر Serverless:</b><br/>
+      Redshift → Create cluster → سایز کوچک (مثلاً dc2.large یا ra3 کوچک بر اساس سهمیه)، 
+      Database نام: <code>analytics</code>، IAM Role برای دسترسی S3 (در صورت Export/Copy).
+    </div>
+    <div class="step">
+      <span class="num">2.2</span><b>جدول تاریخچه آنومالی‌ها:</b><br/>
+      از Query editor v2 یک جدول مثل <code>bp_anomalies(no, systolic, diastolic, score, ts)</code> بساز.
+      نوشتن داده‌های تاریخی را در KDA یا یک Job تکمیلی انجام می‌دهیم (گام 4).
+    </div>
+
+    <h3>3) Kinesis Data Streams (ورود Real-Time)</h3>
+    <div class="step">
+      <span class="num">3.1</span><b>Streamها:</b><br/>
+      Kinesis → Data streams → Create<br/>
+      نام‌ها: <code>bp-stream</code> (فشار خون)، <code>biz-stream</code> (داده بیزینس – اگر لازم شد)<br/>
+      Capacity: <i>On-demand</i> برای سرعت راه‌اندازی.
+    </div>
+
+    <h3>4) Kinesis Data Analytics for SQL (تشخیص آنومالی فشار خون)</h3>
+    <div class="step">
+      <span class="num">4.1</span><b>ایجاد اپ KDA:</b><br/>
+      Kinesis Data Analytics → Create application (SQL) → Source: <code>bp-stream</code> → 
+      در <i>Schema discovery</i> فیلدهای ورودی (مثل <code>no, systolic, diastolic, ts</code>) را کشف/تعریف کن.
+    </div>
+    <div class="step">
+      <span class="num">4.2</span><b>منطق آنومالی (راهنمای RCF توصیه‌شده):</b><br/>
+      از الگوهای Random Cut Forest آمازون برای KDA استفاده کن (Feature: فشار سیستولیک/دیاستولیک).
+      خروجی را فیلتر کن تا فقط رکوردهای آنومالی SELECT شوند (با score). 
+      (در صورت نیاز می‌توان Template RCF نمونه را از مستندات KDA تطبیق داد.)
+    </div>
+    <div class="step">
+      <span class="num">4.3</span><b>خروجی به DynamoDB:</b><br/>
+      در <i>Destinations</i>، AWS Lambda را به‌عنوان سینک انتخاب کن (الگوی متداول):
+      <ol>
+        <li>Lambda (پایتون) بساز که ورودی KDA را گرفته و <code>put_item</code> روی <code>cloudraiser-iot</code> بزند
+            و <code>expireAt = now()+172800</code> تنظیم کند.</li>
+        <li>در تب <i>Destinations</i> اپ KDA، همین Lambda را به‌عنوان مقصد خروجی اضافه کن.</li>
+      </ol>
+      <pre><code># pseudo: lambda_handler(event)
+for rec in event["records"]:
+    d = json.loads(base64.b64decode(rec["data"]))
+    item = {
+      "No": d["no"],
+      "Systolic": str(d["systolic"]),
+      "Diastolic": str(d["diastolic"]),
+      "Score": str(d["score"]),
+      "expireAt": int(time.time()) + 48*3600
+    }
+    table.put_item(Item=item)
+</code></pre>
+    </div>
+
+    <h3>5) انتقال دوره‌ای به Redshift (Historical)</h3>
+    <div class="step">
+      <span class="num">5.1</span><b>Job تکمیلی (اختیاری ولی امتیازآور):</b><br/>
+      راه ساده: یک Lambda زمان‌بندی‌شده (EventBridge Rule هر X دقیقه) 
+      رکوردهای آنومالی جدید DynamoDB را جمع کند و با روش مناسب 
+      (<i>Data API/Copy via S3</i>) وارد Redshift کند. (یا KDA خروجی دوم به S3 بدهد و از آنجا COPY کند)
+    </div>
+
+    <h3>6) تست Stage 1</h3>
+    <div class="step ok">
+      <span class="num">6.1</span><b>تزریق تست به Stream:</b> از تب <i>Test</i> در Kinesis یا با یک Producer ساده (کنسول) چند POST شبیه‌سازی کن تا رکوردها وارد <code>bp-stream</code> شوند.
+    </div>
+    <div class="step ok">
+      <span class="num">6.2</span><b>مانیتورینگ:</b> CloudWatch Logs برای KDA/Lambda، متریک‌های Stream (IncomingRecords)، DynamoDB (SuccessfulRequestLatency).
+    </div>
+  </div>
+</details>
+
+<!-- ===================== Stage 2: سرویس‌ها ===================== -->
+<details>
+  <summary>Stage 2 – سرویس‌ها: وب خروجی DynamoDB (ECS) + API GET برای Aurora</summary>
+  <div>
+
+    <h3>الف) وب‌سرویس خروجی DynamoDB با باینری آماده</h3>
+    <div class="step">
+      <span class="num">A1</span><b>آپلود باینری رسمی:</b> فایل <code>stub1.zip</code> از باکت اعلام‌شده را در باکت شخصی S3 خودت کپی کن (نسخه‌گذاری Bucket را فعال کن). 
+      ⚠️ تغییر/ساخت باینری غیررسمی ممنوع است.
+    </div>
+    <div class="step">
+      <span class="num">A2</span><b>ECR (اختیاری) یا ورود از S3 در زمان اجرا:</b> چون باینری باید همانی باشد، یک ایمیج مینیمال بساز که در EntryPoint هنگام اجرا باینری را از S3 دانلود و اجرا کند (x86/AL2). 
+      (Launch type: ECS on EC2 برای x86. از AMI ECS Optimized AL2 استفاده کن؛ SSM فعال است.)
+    </div>
+    <div class="step">
+      <span class="num">A3</span><b>ECS Cluster:</b> ECS → Networking only → EC2 → Auto Scaling Group در 2 AZ (t3.small). IAM Role نودها: <code>AmazonEC2ContainerRegistryReadOnly</code> + دسترسی S3/DynamoDB/Logs.
+    </div>
+    <div class="step">
+      <span class="num">A4</span><b>Task Definition:</b> <i>EC2</i>، Log driver: awslogs → <code>/wsc/day2/ecs/web</code>، 
+      Env vars: <code>DDB_TABLE=cloudraiser-iot</code>, <code>S3_BIN_URI=s3://.../stub1.zip</code>.
+    </div>
+    <div class="step">
+      <span class="num">A5</span><b>Service + ALB:</b> سرویس 2-3 Replica روی Subnetهای پرایوت، ALB در پابلیک Subnet با Target Group HTTP:80. 
+      Security Group: ALB (80/443 باز)، Taskها فقط از ALB ورودی بگیرند.
+    </div>
+    <div class="step ok">
+      <span class="num">A6</span><b>URL خروجی:</b> DNS ALB را ذخیره کن (برای ارزیابی لازم است). 
+      وب‌سرویس باید JSON نتایج اخیر DynamoDB را برگرداند و لاگ دسترسی‌ها را ذخیره کند.
+    </div>
+
+    <h3>ب) پایگاه داده بیزینس و API GET</h3>
+    <div class="step">
+      <span class="num">B1</span><b>Aurora (MySQL یا PostgreSQL – غیر Serverless):</b> Cluster در 2 AZ، نام DB: <code>bizdb</code>. 
+      جدول: <code>t_values(id, val1..val10)</code> همه string. 
+      Backup هر دو هفته کافی است (طبق سند).
+    </div>
+    <div class="step">
+      <span class="num">B2</span><b>API GET</b> (دو راه):
+      <ol>
+        <li><b>API Gateway + Lambda</b> (پیشنهادی برای سادگی): مسیر <code>/get_value</code>، کوئری <code>?id=xxx</code>؛ Lambda با IAM Role به RDS (از طریق Secret Manager و RDS Proxy برای کانکشن پولاِنگ) وصل می‌شود و یک JSON کامل با val1..val10 برمی‌گرداند.</li>
+        <li><b>ECS Service سبک</b> (اگر بخواهی کل backend روی ECS باشد): یک کانتینر وب که به Aurora وصل می‌شود و خروجی JSON می‌دهد. جلوش WAF/ALB.</li>
+      </ol>
+    </div>
+    <div class="step">
+      <span class="num">B3</span><b>امنیت و محافظت:</b> WAF روی ALB یا روی API Gateway برای محافظت در برابر حملات رایج. 
+      Security Groupهای حداقلی، SG DB فقط از لایه اپ اجازه بگیرد.
+    </div>
+    <div class="step ok">
+      <span class="num">B4</span><b>تست:</b> 
+      <code>curl "http://ALB-DNS/get_value?id=01"</code> یا <code>https://api-id.execute-api.../get_value?id=01</code> 
+      و بررسی CloudWatch Logs.
+    </div>
+  </div>
+</details>
+
+<!-- ===================== Stage 3: بهینه‌سازی/Well-Architected ===================== -->
+<details>
+  <summary>Stage 3 – مانیتورینگ، بهینه‌سازی، Well-Architected</summary>
+  <div>
+    <div class="step">
+      <span class="num">C1</span><b>مانیتورینگ:</b> داشبورد CloudWatch (Kinesis, Lambda, DynamoDB, ECS, API/ALB)، 
+      آلارم روی ErrorRate/Latency/Throttling. X-Ray برای Trace مسیر API.
+    </div>
+    <div class="step">
+      <span class="num">C2</span><b>هزینه:</b> On-demand Streams/Table، Auto Scaling سرویس ECS، پاکسازی لاگ‌ها و Lifecycle روی باکت‌ها. 
+    </div>
+    <div class="step">
+      <span class="num">C3</span><b>Ops:</b> CodePipeline برای ECS (Build → Review → Deploy با CodeDeploy/Blue-Green). 
+      برای باینری رسمی، فقط بسته‌بندی/استفاده بدون تغییر.
+    </div>
+  </div>
+</details>
+
+<!-- ===================== Cleanup ===================== -->
+<details>
+  <summary>Cleanup – جلوگیری از هزینه</summary>
+  <div>
+    <ul>
+      <li>غیرفعال/حذف KDA App, Kinesis Streams</li>
+      <li>حذف Service/Task/EC2های ECS و ALB</li>
+      <li>حذف Redshift Cluster (snapshot اگر لازم است)</li>
+      <li>حذف RDS/Aurora (final snapshot اگر لازم است)</li>
+      <li>حذف DynamoDB table, S3 bucket test, Log groups</li>
+    </ul>
+  </div>
+</details>
+
+</body>
+</html>
