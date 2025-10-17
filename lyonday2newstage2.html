@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>WSC Day2 – راهنمای فوق‌جزئی کنسول (Stage-0..3 کامل)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- سبک ساده و تمیز -->
+  <style>
+    :root{
+      --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --muted:#475569;
+      --brand:#2563eb; --ok:#16a34a; --warn:#d97706; --line:#e2e8f0;
+      --code:#f1f5f9;
+    }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:Vazirmatn,IRANSans,Segoe UI,Arial;line-height:1.75}
+    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+    h1{font-size:28px;margin:0 0 14px}
+    .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+    .pill{display:inline-block;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:999px;padding:2px 10px;font-size:12px;margin-inline:6px 0}
+    details{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:12px 0;padding:10px 14px}
+    summary{cursor:pointer;font-weight:700}
+    .step{border-inline-start:4px solid var(--brand);background:#fff;padding:12px;border-radius:10px;margin:12px 0}
+    .num{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:8px;background:var(--brand);color:#fff;font-size:12px;margin-inline:6px}
+    .mini{color:var(--muted);font-size:13px;margin-top:6px}
+    code{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:2px 6px}
+    pre{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:12px;overflow:auto}
+    ul,ol{margin:8px 0 8px 0}
+    .callout{border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px}
+    .ok{border-color:#bbf7d0;background:#f0fdf4}
+    .warn{border-color:#fde68a;background:#fffbeb}
+    .tight li{margin:4px 0}
+    .path{font-family:ui-monospace,monospace;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:3px 6px}
+    .hr{height:1px;background:var(--line);margin:16px 0}
+    .kbd{border:1px solid var(--line);border-bottom-width:3px;border-radius:8px;padding:2px 6px;background:#fff;font-family:ui-monospace,monospace}
+    .btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 10px;cursor:pointer}
+    .btn:hover{border-color:var(--brand)}
+  </style>
+  <script>
+    // میانبر: Shift+S => باز/بسته کردن همهٔ details
+    document.addEventListener('keydown',(e)=>{
+      if(e.key.toLowerCase()==='s' && e.shiftKey){
+        const all=[...document.querySelectorAll('details')];
+        const hasClosed=all.some(d=>!d.open);
+        all.forEach(d=>d.open=hasClosed);
+      }
+    });
+    function toggleAll(open){document.querySelectorAll('details').forEach(d=>d.open=open);}
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <h1>WSC 2024 – Day 2 (TP53)</h1>
+    <div class="sub">
+      راهنمای فوق‌جزئی «فقط از طریق کنسول». <span class="pill">Region: us-east-1</span>
+      <span class="pill">EKS ممنوع</span> <span class="pill">ECS توصیه‌شده</span>
+      <button class="btn" onclick="toggleAll(true)">باز کردن همه</button>
+      <button class="btn" onclick="toggleAll(false)">بستن همه</button>
+      <span class="mini">میانبر: <span class="kbd">Shift</span>+<span class="kbd">S</span></span>
+    </div>
+
+    <!-- قوانین کلیدی -->
+    <div class="callout warn">
+      <b>الزامات کلیدی:</b>
+      <ul class="tight">
+        <li>فشار خون → Kinesis → KDA (آنومالی) → DynamoDB (<code>cloudraiser-iot</code>, TTL=48h)</li>
+        <li>آنومالی‌های تاریخی در Redshift (غیر Serverless)</li>
+        <li>دادهٔ بیزینس در Aurora (غیر Serverless) + API GET</li>
+        <li>وب‌سرویس خروجی DynamoDB با باینری رسمی (x86/AL2) روی ECS</li>
+      </ul>
+    </div>
+
+    <!-- ========================= Stage 0 ========================= -->
+    <details>
+      <summary>Stage 0 — پیش‌نیاز شبکه/لاگ (خلاصهٔ ریز)</summary>
+      <div class="step"><span class="num">0.1</span>VPC <span class="mini">مسیر: <span class="path">VPC → Create VPC → VPC and more</span> (2AZ, 2 pub + 2 priv, IGW/NAT)</span></div>
+      <div class="step"><span class="num">0.2</span>Endpoints <span class="mini">S3/DynamoDB=Gateway، Kinesis/Logs=Interface</span></div>
+      <div class="step"><span class="num">0.3</span>Log groups <code>/wsc/day2/*</code></div>
+    </details>
+
+    <!-- ========================= Stage 1 ========================= -->
+    <details>
+      <summary>Stage 1 — Kinesis → KDA → DynamoDB (خلاصهٔ انجام‌شده)</summary>
+      <div class="step">
+        <span class="num">1</span>جدول <code>cloudraiser-iot</code> با PK=<code>No</code> (String) + TTL=<code>expireAt</code>  
+        Kinesis Stream: <code>bp-stream</code> (On-demand)  
+        KDA(SQL) با خروجی به Lambda <code>kda-ddb-sink</code> (PutItem → DDB).
+      </div>
+    </details>
+
+    <!-- ========================= Stage 2A ========================= -->
+    <details open>
+      <summary>Stage 2A — وب‌سرویس خروجی DynamoDB با «باینری رسمی» روی ECS (فقط کنسول)</summary>
+
+      <div class="step">
+        <span class="num">2A-1</span><b>آپلود باینری رسمی به S3</b>
+        <div class="mini">مسیر: <span class="path">S3 → Create bucket</span></div>
+        <ol>
+          <li>Bucket: <code>wsc-day2-artifacts-YOURID</code> (Block public access روشن)</li>
+          <li>Upload: فایل <code>stub1.zip</code> (یا نام اعلام‌شده در سناریو)</li>
+          <li>Versioning: بهتره روشن باشد</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">2A-2</span><b>ساخت ECS Cluster (EC2 Launch Type)</b>
+        <div class="mini">مسیر: <span class="path">ECS → Clusters → Create</span></div>
+        <ol>
+          <li>Template: <b>Networking only</b></li>
+          <li>Infrastructure: <b>Amazon EC2 instances</b></li>
+          <li>Instance type: <code>t3.small</code>، Desired hosts: 2، Subnets: خصوصی (a,b)</li>
+          <li>Security Group (پیاده‌سازی پیشنهادی):
+            <ul class="tight">
+              <li><b>SG-ECS-TASK</b>: ورودی فقط از <b>SG-ALB</b> روی پورت برنامه (پیش‌فرض 8080)</li>
+              <li>خروجی باز (یا به VPC Endpoints)</li>
+            </ul>
+          </li>
+          <li>IAM Role نودها: <b>ecsInstanceRole</b> با Policy‌ها:
+            <ul class="tight">
+              <li><code>AmazonEC2ContainerRegistryReadOnly</code></li>
+              <li><code>AmazonSSMManagedInstanceCore</code> (برای SSM)</li>
+              <li>(در صورت نیاز) دسترسی به S3 برای کشیدن باینری در زمان اجرا</li>
+            </ul>
+          </li>
+          <li>Create</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">2A-3</span><b>Task Definition (EC2) – دانلود باینری از S3 و اجرا</b>
+        <div class="mini">مسیر: <span class="path">ECS → Task definitions → Create new → EC2</span></div>
+        <ol>
+          <li>Task family: <code>ddb-stub-web</code>, CPU/Memory: 256/512</li>
+          <li>Task Role (جدید بساز): <b>taskRole-ddbweb</b> با Policy حداقلی:
+            <pre>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect":"Allow","Action":["dynamodb:Query","dynamodb:Scan","dynamodb:GetItem"],"Resource":"arn:aws:dynamodb:us-east-1:ACCOUNTID:table/cloudraiser-iot"},
+    {"Effect":"Allow","Action":["s3:GetObject"],"Resource":"arn:aws:s3:::wsc-day2-artifacts-YOURID/*"},
+    {"Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"*"}
+  ]
+}</pre>
+          </li>
+          <li>Execution Role: از پیش‌فرض <code>ecsTaskExecutionRole</code> استفاده کن</li>
+          <li>Container:
+            <ul class="tight">
+              <li>Image: <code>public.ecr.aws/amazonlinux/amazonlinux:2023</code> (مینیمال برای اجرای اسکریپت)</li>
+              <li>Port mappings: <code>8080/tcp</code></li>
+              <li>Log driver: awslogs → گروه: <code>/wsc/day2/ecs/web</code></li>
+              <li>Command:
+                <pre>bash -lc "dnf -y install unzip python3 && \
+aws s3 cp s3://wsc-day2-artifacts-YOURID/stub1.zip /tmp/ && \
+unzip -o /tmp/stub1.zip -d /opt/app && \
+export TABLE_NAME=cloudraiser-iot PORT=8080 && \
+python3 /opt/app/server.py"</pre>
+                <div class="mini">🔎 فرض شده فایل زیپ شامل اسکریپت/باینری وب‌سرور است (مثلاً <code>server.py</code>) که DDB می‌خواند و روی پورت 8080 سرو می‌کند.</div>
+              </li>
+              <li>Environment:
+                <ul class="tight">
+                  <li><code>TABLE_NAME = cloudraiser-iot</code></li>
+                  <li><code>PORT = 8080</code></li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+          <li>Create</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">2A-4</span><b>ساخت ALB و Target Group</b>
+        <div class="mini">مسیر: <span class="path">EC2 → Load Balancers → Create → Application Load Balancer</span></div>
+        <ol>
+          <li>Name: <code>wsc-alb</code>، Scheme: Internet-facing، Subnets: پابلیک (a,b)</li>
+          <li>Security Group: <b>SG-ALB</b> (ورودی 80/443 از اینترنت)</li>
+          <li>Target Group: <code>tg-ddbweb</code> (نوع: instance یا IP) – Health check:
+            <ul class="tight">
+              <li>Protocol: HTTP، Path: <code>/health</code> (یا <code>/</code> اگر سلامت خاص نداری)</li>
+              <li>Port: <code>traffic-port</code> (8080)</li>
+            </ul>
+          </li>
+          <li>Listener: HTTP:80 → Forward به <code>tg-ddbweb</code></li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">2A-5</span><b>ایجاد Service در ECS و اتصال به ALB</b>
+        <div class="mini">مسیر: <span class="path">ECS → Clusters → your-cluster → Create → Service</span></div>
+        <ol>
+          <li>Launch type: EC2، Task: <code>ddb-stub-web</code></li>
+          <li>Desired tasks: 2، Subnets: خصوصی (a,b)، SG: <b>SG-ECS-TASK</b></li>
+          <li>Load balancing: Application → Target group: <code>tg-ddbweb</code>، Port: 8080</li>
+          <li>Auto scaling: حداقل 2، حداکثر 4 (اختیاری)</li>
+          <li>Create Service</li>
+        </ol>
+      </div>
+
+      <div class="step ok">
+        <span class="num">2A-6</span><b>تست وب‌سرویس DDB</b>
+        <ol>
+          <li>DNS ALB را از جزئیات <code>wsc-alb</code> بردار (مثل: <code>wsc-alb-1234.us-east-1.elb.amazonaws.com</code>)</li>
+          <li>مرورگر: <code>http://ALB-DNS/</code> یا <code>/health</code></li>
+          <li>CloudWatch Logs: <code>/wsc/day2/ecs/web</code> را چک کن (خطای DDB/S3)</li>
+        </ol>
+      </div>
+
+      <div class="callout">
+        <b>خطاهای رایج و رفع سریع (2A):</b>
+        <ul class="tight">
+          <li><b>Healthy=0%</b>: مسیر HealthCheck را درست کن (اگر اپ مسیر ندارد، <code>/</code> بگذار)</li>
+          <li><b>AccessDenied به S3/DDB</b>: Task Role را با Policy حداقلی بالا بررسی کن</li>
+          <li><b>Timeout</b>: SGها را چک کن — ALB باید به پورت 8080 Taskها دسترسی داشته باشد</li>
+        </ul>
+      </div>
+    </details>
+
+    <!-- ========================= Stage 2B ========================= -->
+    <details open>
+      <summary>Stage 2B — Aurora (غیر Serverless) + سرویس GET روی ECS (API برای val1..val10)</summary>
+
+      <div class="step">
+        <span class="num">2B-1</span><b>ایجاد Aurora PostgreSQL (غیر Serverless)</b>
+        <div class="mini">مسیر: <span class="path">RDS → Create database → Amazon Aurora</span></div>
+        <ol>
+          <li>Edition: <b>Aurora PostgreSQL-Compatible</b> (Provisioned)</li>
+          <li>DB cluster identifier: <code>biz-aurora</code></li>
+          <li>Master username/password را تعیین کن (یا Secrets Manager)</li>
+          <li>VPC: همان <code>wsc-day2</code>، Subnets: خصوصی (a,b)، Public access: No</li>
+          <li>Security Group DB: <b>SG-DB</b> (ورودی Port 5432 فقط از <b>SG-ECS-TASK</b>)</li>
+          <li>Create</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">2B-2</span><b>ایجاد جدول بیزینس</b>
+        <div class="mini">مسیر: <span class="path">RDS → Databases → biz-aurora → Query editor v2</span> یا با کلاینت</div>
+        <pre>CREATE TABLE IF NOT EXISTS t_values(
+  id    varchar(64) PRIMARY KEY,
+  val1  text, val2  text, val3  text, val4  text, val5  text,
+  val6  text, val7  text, val8  text, val9  text, val10 text
+);
+INSERT INTO t_values(id,val1,val2) VALUES ('01','A','B')
+ON CONFLICT (id) DO NOTHING;</pre>
+      </div>
+
+      <div class="step">
+        <span class="num">2B-3</span><b>سرویس API روی ECS (FastAPI) — فقط کنسول</b>
+        <div class="mini">ایده: یک ایمیج ساده بساز که با <code>psycopg2-binary</code> به Aurora وصل شود و مسیر <code>/get_value?id=XX</code> را برگرداند.</div>
+        <ol>
+          <li><b>ECR ریپو</b> بساز: <span class="path">ECR → Create repository → <code>biz-api</code></span></li>
+          <li><b>Dockerfile</b> (در سیستم خودت بساز و Push کن):
+            <pre># Dockerfile (python:3.12 on AL2023)
+FROM public.ecr.aws/docker/library/python:3.12-alpine
+RUN pip install --no-cache-dir fastapi uvicorn psycopg2-binary
+WORKDIR /app
+COPY app.py /app/app.py
+ENV PORT=8081
+CMD ["python","-m","uvicorn","app:app","--host","0.0.0.0","--port","8081"]</pre>
+          </li>
+          <li><b>app.py</b>:
+            <pre>from fastapi import FastAPI, HTTPException
+import os, psycopg2
+
+app = FastAPI()
+DB_HOST=os.getenv("DB_HOST"); DB_NAME=os.getenv("DB_NAME","postgres")
+DB_USER=os.getenv("DB_USER"); DB_PASS=os.getenv("DB_PASS")
+DB_PORT=os.getenv("DB_PORT","5432")
+
+def fetch_row(id_):
+    conn=psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASS, port=DB_PORT, connect_timeout=3)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,val1,val2,val3,val4,val5,val6,val7,val8,val9,val10 FROM t_values WHERE id=%s", (id_,))
+            r=cur.fetchone()
+            if not r: return None
+            keys=["id","val1","val2","val3","val4","val5","val6","val7","val8","val9","val10"]
+            return dict(zip(keys, r))
+    finally:
+        conn.close()
+
+@app.get("/health")
+def health(): return {"ok":True}
+
+@app.get("/get_value")
+def get_value(id: str):
+    row=fetch_row(id)
+    if not row: raise HTTPException(404,"not found")
+    return row</pre>
+          </li>
+          <li><b>Build & Push</b> (روی سیستم خودت):
+            <pre># Login به ECR از کنسول بهت دستور میده
+docker build -t biz-api:latest .
+docker tag biz-api:latest ACCOUNTID.dkr.ecr.us-east-1.amazonaws.com/biz-api:latest
+docker push ACCOUNTID.dkr.ecr.us-east-1.amazonaws.com/biz-api:latest</pre>
+          </li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">2B-4</span><b>Task Definition (EC2) برای API</b>
+        <div class="mini">مسیر: <span class="path">ECS → Task definitions → Create new → EC2</span></div>
+        <ol>
+          <li>Family: <code>biz-api</code>, CPU/Memory: 256/512</li>
+          <li>Task Role: <b>taskRole-bizapi</b> (نیاز خاصی جز Logs ندارد)</li>
+          <li>Execution Role: <code>ecsTaskExecutionRole</code></li>
+          <li>Container:
+            <ul class="tight">
+              <li>Image: <code>…/biz-api:latest</code></li>
+              <li>Port: <code>8081</code></li>
+              <li>Logs: <code>/wsc/day2/api</code></li>
+              <li>Env (Plaintext یا از Secrets Manager):
+                <ul class="tight">
+                  <li><code>DB_HOST =</code> آدرس Writer از پنل RDS (Endpoint)</li>
+                  <li><code>DB_NAME = postgres</code> (یا نامی که ساختی)</li>
+                  <li><code>DB_USER, DB_PASS</code> (ترجیحاً از Secrets Manager)</li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+          <li>Create</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">2B-5</span><b>Service + Target Group + Rule در ALB</b>
+        <ol>
+          <li>Target Group دوم: <code>tg-bizapi</code>، Health check: <code>/health</code>، Port: 8081</li>
+          <li>روی ALB یک Rule بساز:
+            <ul class="tight">
+              <li>Listener HTTP:80 → اگر Path <code>/get_value*</code> → Forward به <code>tg-bizapi</code></li>
+              <li>Rule پیش‌فرض همچنان به <code>tg-ddbweb</code> می‌رود (وب خروجی DDB)</li>
+            </ul>
+          </li>
+          <li>ایجاد Service در ECS:
+            <ul class="tight">
+              <li>Cluster: قبلی، Task: <code>biz-api</code>, Desired: 2</li>
+              <li>Subnets: خصوصی، SG: <b>SG-ECS-TASK</b></li>
+              <li>Load balancing: Application → Target group: <code>tg-bizapi</code></li>
+            </ul>
+          </li>
+        </ol>
+      </div>
+
+      <div class="step ok">
+        <span class="num">2B-6</span><b>تست API GET</b>
+        <ol>
+          <li>مرورگر/curl: <code>http://ALB-DNS/get_value?id=01</code></li>
+          <li>باید JSON شامل <code>val1..val10</code> برگردد</li>
+          <li>اگر 404 گرفتید: دیتای جدول را چک کنید (مرحله 2B-2)</li>
+        </ol>
+      </div>
+
+      <div class="callout">
+        <b>نکات امنیتی (Stage-2):</b>
+        <ul class="tight">
+          <li>SG-DB فقط از SG-ECS-TASK اجازه بگیرد (نه از اینترنت)</li>
+          <li>Secrets را در Secrets Manager بگذار و در Task Definition به‌صورت <i>ValueFrom</i> تزریق کن</li>
+          <li>ALB را بعداً با WAF محافظت کن (Stage-3)</li>
+        </ul>
+      </div>
+
+      <div class="callout">
+        <b>خطاهای رایج و رفع سریع (2B):</b>
+        <ul class="tight">
+          <li><b>Connection refused به DB</b>: SGها/Port 5432 و Endpoint درست را بررسی کن</li>
+          <li><b>IAM مشکلی ندارد ولی اپ 5xx می‌دهد</b>: لاگ‌های <code>/wsc/day2/api</code> را بازبینی کن (Dependency psycopg2/Env)</li>
+          <li><b>Rule ALB کار نمی‌کند</b>: ترتیب Ruleها را چک کن؛ Path باید با <code>/get_value</code> شروع شود</li>
+        </ul>
+      </div>
+    </details>
+
+    <!-- ========================= Stage 3 ========================= -->
+    <details open>
+      <summary>Stage 3 — مانیتورینگ، بهینه‌سازی، WAF، Ops</summary>
+
+      <div class="step">
+        <span class="num">3-1</span><b>CloudWatch Dashboard (سریع)</b>
+        <div class="mini">مسیر: <span class="path">CloudWatch → Dashboards → Create dashboard</span></div>
+        <ul class="tight">
+          <li>Kinesis: IncomingRecords/IteratorAge</li>
+          <li>Lambda: Errors/Duration برای <code>kda-ddb-sink</code></li>
+          <li>DynamoDB: ThrottledRequests</li>
+          <li>ALB: 4xx/5xx, TargetResponseTime</li>
+          <li>ECS Serviceها: CPU/MemoryUtilization</li>
+          <li>RDS: CPU, FreeableMemory, DBConnections, CommitLatency</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <span class="num">3-2</span><b>CloudWatch Alarms (حداقل‌ها)</b>
+        <ul class="tight">
+          <li>KDA/Lambda Errors > 0 برای 5 دقیقه → SNS اعلان</li>
+          <li>ALB 5xx > 1% برای 5 دقیقه → SNS</li>
+          <li>RDS FreeStorageSpace پایین → SNS</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <span class="num">3-3</span><b>WAF روی ALB (یا API)</b>
+        <div class="mini">مسیر: <span class="path">WAF & Shield → Web ACLs → Create</span></div>
+        <ol>
+          <li>Region: us-east-1، Name: <code>wsc-web-acl</code></li>
+          <li>Add rules → <b>AWS Managed Rule groups</b>:
+            <ul class="tight">
+              <li>Core rule set (CRS)</li>
+              <li>SQLi, NoSQLi, CommonRule</li>
+              <li>Bot Control (اگر مجاز بود)</li>
+            </ul>
+          </li>
+          <li>Default action: Allow</li>
+          <li>Resources: ALB <code>wsc-alb</code> را Associate کن</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <span class="num">3-4</span><b>Cost/Scale</b>
+        <ul class="tight">
+          <li>Kinesis/DDB روی On-demand اوکی، ولی با رشد ترافیک Auto Scaling ECS را تنظیم کن</li>
+          <li>Log Retention را برای گروه‌ها تنظیم کن (۷ یا ۱۴ روز)</li>
+          <li>S3 Lifecycle برای artifacts/logs فعال کن</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <span class="num">3-5</span><b>Ops (بیلد/دیپلوی)</b>
+        <ul class="tight">
+          <li>برای سرویس‌های ECS: CodePipeline (Source: ECR، Deploy: CodeDeploy/Blue-Green)</li>
+          <li>برای باینری رسمی: فقط بسته‌بندی/اجرا — تغییر محتوا ممنوع</li>
+        </ul>
+      </div>
+    </details>
+
+    <!-- ========================= Cleanup ========================= -->
+    <details>
+      <summary>Cleanup — جلوگیری از هزینه</summary>
+      <div class="step">
+        <span class="num">C</span>
+        <ul class="tight">
+          <li>Stop/Delete: KDA App, Kinesis Streams</li>
+          <li>Delete Services/Tasks/Autoscaling/ALB</li>
+          <li>Delete DynamoDB table (در صورت تمرینی)</li>
+          <li>Delete RDS/Aurora (final snapshot اگر لازم است)</li>
+          <li>Delete Redshift cluster (snapshot اگر لازم است)</li>
+          <li>حذف Log groupهای غیرضروری</li>
+        </ul>
+      </div>
+    </details>
+
+  </div>
+</body>
+</html>
